@@ -1,0 +1,29 @@
+---
+name: Default
+on:
+  push:
+    branches: [master]
+    tags: [v*]
+  pull_request:
+    branches: [master]
+
+jobs:
+  main:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/cache@v5
+        with:
+          path: ~/.cargo/registry
+          key: cargo-linux-${{ hashFiles('**/Cargo.lock') }}
+      - run: |
+          rustc --version
+          cargo --version
+          cargo fmt --version
+          cargo clippy --version
+      - run: cargo fmt -- --check
+      - run: cargo check --locked
+      - run: cargo clippy --locked
+      - run: cargo test --locked
+      - run: cargo build --locked --release --verbose
