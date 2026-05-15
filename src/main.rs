@@ -15,7 +15,9 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use ipsort::parse;
+use ipnet::IpNet;
+use ipsort::{parse, sort};
+use std::str::FromStr;
 
 fn main() {
     let tokens = vec![
@@ -53,5 +55,28 @@ fn main() {
                 println!("NotAnIp     {s:?}");
             }
         }
+    }
+
+    let mut networks: Vec<IpNet> = vec![
+        "192.168.1.0/24",
+        "10.0.0.0/24",
+        "172.16.0.0/12",
+        "10.0.0.0/8",
+        "192.168.0.0/16",
+        "10.0.0.1", // bare ip gets dropped
+        "172.16.1.0/24",
+        "2001:db8::/32",
+        "::1/128",
+        "2001:db8:1::/48",
+    ]
+    .iter()
+    .filter_map(|s| IpNet::from_str(s).ok())
+    .collect();
+
+    let opts = sort::SortOptions::default();
+    networks.sort_by(|a, b| sort::compare(a, b, &opts));
+
+    for net in &networks {
+        println!("{net}");
     }
 }
