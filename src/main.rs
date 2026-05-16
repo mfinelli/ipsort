@@ -15,52 +15,143 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-use blocks::sort_blocks;
-use classify::{ClassifiedLine, classify_line};
-use ipsort::{blocks, classify, output, sort};
-use output::{OutputOptions, render_line};
-use sort::SortOptions;
+use clap::{CommandFactory, Parser};
+use clap_complete::{Shell, generate};
+use ipsort::blocks::sort_blocks;
+use ipsort::classify::{ClassifiedLine, classify_line};
+use ipsort::output::{IpsOnlyMode, OutputOptions, render_line};
+use ipsort::sort::SortOptions;
+use std::io::{self, BufRead, IsTerminal};
+
+#[derive(Parser)]
+#[command(
+    name = "ipsort",
+    about = "Sort IP addresses and CIDRs numerically",
+    long_about = "Sort IP addresses and CIDRs by their actual numeric value.\n\
+                  Accepts input from stdin or positional arguments.\n\
+                  Use '-' to read explicitly from stdin."
+)]
+struct Cli {
+    /// Input CIDRs. Pass one or more addresses, a comma/space-separated list,
+    /// or '-' to read from stdin.
+    addresses: Vec<String>,
+
+    /// Reverse the sort order
+    #[arg(short, long)]
+    reverse: bool,
+
+    /// Sort IPv6 addresses before IPv4
+    #[arg(long)]
+    ipv6_first: bool,
+
+    /// Remove duplicate addresses (compared by normalized CIDR)
+    #[arg(short, long)]
+    unique: bool,
+
+    /// Reorder all IP tokens freely across the entire input
+    #[arg(long)]
+    inline: bool,
+
+    /// Emit canonical network strings (clears host bits, adds /32 or /128)
+    #[arg(long)]
+    normalize: bool,
+
+    /// Strip all non-IP content and emit one bare address per line
+    #[arg(long, conflicts_with = "ips_only_with_structure")]
+    ips_only: bool,
+
+    /// Strip decoration but preserve non-IP lines as block separators
+    #[arg(long, conflicts_with = "ips_only")]
+    ips_only_with_structure: bool,
+
+    /// Generate shell completions for the given shell and print to stdout
+    #[arg(long, value_name = "SHELL", hide = true)]
+    generate_completions: Option<Shell>,
+}
 
 fn main() {
-    let input = vec![
-        "# group one: plain CIDRs",
-        "192.168.1.0/24",
-        "10.0.0.0/8",
-        "172.16.0.0/12",
-        "",
-        "# group two: yaml list",
-        "- 192.168.2.0/24",
-        "- 10.10.0.0/16",
-        "",
-        "# group three: multi-ip lines",
-        "network: 172.16.5.0/24 172.16.1.0/24",
-        "\"192.168.0.0/16\", \"10.0.0.0/8\"",
-        "",
-        "# group four: host bits and bare IPs",
-        "10.0.0.5/24",
-        "192.168.1.1",
-    ];
+    let cli = Cli::parse();
 
-    let sort_opts = SortOptions::default();
-    let out_opts = OutputOptions::default();
-    // let out_opts = OutputOptions { normalize: true, ..Default::default() };
-    // let out_opts = OutputOptions { ips_only: true, ..Default::default() };
+    // Handle completion generation before anything else
+    if let Some(shell) = cli.generate_completions {
+        let mut cmd = Cli::command();
+        generate(shell, &mut cmd, "ipsort", &mut io::stdout());
+        return;
+    }
 
-    let classified: Vec<ClassifiedLine> = input
+    // Validate: stdin + positional args are mutually exclusive
+    let has_args = !cli.addresses.is_empty()
+        && !(cli.addresses.len() == 1 && cli.addresses[0] == "-");
+
+    // Read input into lines
+    let lines: Vec<String> = if has_args {
+        cli.addresses.clone()
+    } else {
+        let stdin = io::stdin();
+        let is_tty = stdin.is_terminal();
+        let lines: Vec<String> = stdin
+            .lock()
+            .lines()
+            .map(|l| l.expect("failed to read from stdin"))
+            .collect();
+        if !is_tty && lines.is_empty() {
+            eprintln!("ipsort: no input provided");
+            std::process::exit(1);
+        }
+        lines
+    };
+
+    // Warn about unimplemented flags
+    if cli.inline {
+        eprintln!("ipsort: --inline is not yet implemented");
+        std::process::exit(1);
+    }
+    if cli.unique {
+        eprintln!("ipsort: --unique is not yet implemented");
+        std::process::exit(1);
+    }
+
+    let sort_opts = SortOptions {
+        ipv6_first: cli.ipv6_first,
+        reverse: cli.reverse,
+    };
+
+    let out_opts = OutputOptions {
+        normalize: cli.normalize,
+        ips_only: if cli.ips_only {
+            IpsOnlyMode::Flat
+        } else if cli.ips_only_with_structure {
+            IpsOnlyMode::WithStructure
+        } else {
+            IpsOnlyMode::Off
+        },
+    };
+
+    // Classify lines
+    let classified: Vec<ClassifiedLine> = lines
         .iter()
         .map(|line| classify_line(line, &sort_opts))
         .collect();
 
+    // Check that at least one IP was found
+    let has_any_ip = classified
+        .iter()
+        .any(|l| matches!(l, ClassifiedLine::HasIp { .. }));
+    if !has_any_ip {
+        eprintln!("ipsort: no IP addresses found in input");
+        std::process::exit(1);
+    }
+
+    // Sort blocks
     let sorted = sort_blocks(classified, &sort_opts);
 
+    // Render and print
     for line in &sorted {
-        // Emit any warnings to stderr before rendering
         if let ClassifiedLine::HasIp { warnings, .. } = line {
             for w in warnings {
                 eprintln!("{w}");
             }
         }
-
         for rendered in render_line(line, &out_opts, &sort_opts) {
             println!("{rendered}");
         }
