@@ -17,5 +17,6 @@
 
 pub mod blocks;
 pub mod classify;
+pub mod output;
 pub mod parse;
 pub mod sort;

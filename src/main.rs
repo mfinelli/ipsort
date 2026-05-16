@@ -16,166 +16,53 @@
  */
 
 use blocks::sort_blocks;
-use classify::{ClassifiedLine, Span, classify_line};
-use ipnet::IpNet;
-use ipsort::{blocks, classify, parse, sort};
+use classify::{ClassifiedLine, classify_line};
+use ipsort::{blocks, classify, output, sort};
+use output::{OutputOptions, render_line};
 use sort::SortOptions;
-use std::str::FromStr;
 
 fn main() {
-    let opts = SortOptions::default();
-
-    let tokens = vec![
-        "192.168.1.50/24", // host bits set
-        "10.0.0.0/8",
-        "172.16.0.5",  // bare IP, promoted to /32
-        "10.0.0.0/24", // more specific than 10.0.0.0/8
-        "192.168.1.0/24",
-        "not-an-ip",
-        "\"172.16.10.0/24\",", // punctuation-wrapped
-        "10.0.0.1",            // bare IP
-    ];
-
-    for token in &tokens {
-        let parsed = parse::parse_token(token);
-        match &parsed {
-            parse::ParsedToken::ValidCidr {
-                original,
-                network,
-                had_host_bits,
-            } => {
-                if *had_host_bits {
-                    eprintln!(
-                        "warning: host bits set in {original:?}, treating as {network}"
-                    );
-                }
-                println!("ValidCidr   original={original:?} network={network}");
-            }
-            parse::ParsedToken::BareIp { original, network } => {
-                println!(
-                    "BareIp      original={original:?} promoted={network}"
-                );
-            }
-            parse::ParsedToken::NotAnIp(s) => {
-                println!("NotAnIp     {s:?}");
-            }
-        }
-    }
-
-    let mut networks: Vec<IpNet> = vec![
-        "192.168.1.0/24",
-        "10.0.0.0/24",
-        "172.16.0.0/12",
-        "10.0.0.0/8",
-        "192.168.0.0/16",
-        "10.0.0.1", // bare ip gets dropped
-        "172.16.1.0/24",
-        "2001:db8::/32",
-        "::1/128",
-        "2001:db8:1::/48",
-    ]
-    .iter()
-    .filter_map(|s| IpNet::from_str(s).ok())
-    .collect();
-
-    networks.sort_by(|a, b| sort::compare(a, b, &opts));
-
-    for net in &networks {
-        println!("{net}");
-    }
-
     let input = vec![
-        "# plain CIDRs",
+        "# group one: plain CIDRs",
         "192.168.1.0/24",
         "10.0.0.0/8",
+        "172.16.0.0/12",
         "",
-        "# yaml list",
+        "# group two: yaml list",
         "- 192.168.2.0/24",
         "- 10.10.0.0/16",
         "",
-        "# multi-ip lines",
+        "# group three: multi-ip lines",
         "network: 172.16.5.0/24 172.16.1.0/24",
-        "\"10.0.1.0/24\", \"10.0.2.0/24\"",
+        "\"192.168.0.0/16\", \"10.0.0.0/8\"",
         "",
-        "# host bits set",
+        "# group four: host bits and bare IPs",
         "10.0.0.5/24",
-        "",
-        "# non-ip content",
-        "# just a comment",
-        "---",
+        "192.168.1.1",
     ];
 
-    for line in &input {
-        let classified = classify_line(line, &opts);
-        match &classified {
-            ClassifiedLine::HasIp {
-                spans,
-                sort_key,
-                warnings,
-            } => {
-                for w in warnings {
-                    eprintln!("{w}");
-                }
-                print!("HasIp sort_key={sort_key:20}  spans=[");
-                for span in spans {
-                    match span {
-                        Span::Ip(t) => print!(" Ip({:?})", t.original()),
-                        Span::NonIp(s) => print!(" NonIp({s:?})"),
-                    }
-                }
-                println!(" ]");
-            }
-            ClassifiedLine::NoIp(s) => {
-                println!("NoIp  {s:?}");
-            }
-        }
-    }
-
-    let input = vec![
-        "# group one",
-        "192.168.1.0/24",
-        "10.0.0.0/8",
-        "172.16.0.0/12",
-        "",
-        "# group two",
-        "- 192.168.2.0/24",
-        "- 10.10.0.0/16",
-        "",
-        "# group three (mixed content lines)",
-        "network: 172.16.5.0/24 172.16.1.0/24",
-        "\"10.0.1.0/24\", \"10.0.2.0/24\"",
-    ];
+    let sort_opts = SortOptions::default();
+    let out_opts = OutputOptions::default();
+    // let out_opts = OutputOptions { normalize: true, ..Default::default() };
+    // let out_opts = OutputOptions { ips_only: true, ..Default::default() };
 
     let classified: Vec<ClassifiedLine> = input
         .iter()
-        .map(|line| classify_line(line, &opts))
+        .map(|line| classify_line(line, &sort_opts))
         .collect();
 
-    let sorted = sort_blocks(classified, &opts);
+    let sorted = sort_blocks(classified, &sort_opts);
 
     for line in &sorted {
-        match line {
-            ClassifiedLine::HasIp {
-                spans,
-                sort_key,
-                warnings,
-                ..
-            } => {
-                for w in warnings {
-                    eprintln!("{w}");
-                }
-                print!("HasIp sort_key={sort_key:20}  spans=[");
-                for span in spans {
-                    match span {
-                        Span::Ip(t) => print!(" Ip({:?})", t.original()),
-                        Span::NonIp(s) => print!(" NonIp({s:?})"),
-                    }
-                }
-                println!(" ]");
+        // Emit any warnings to stderr before rendering
+        if let ClassifiedLine::HasIp { warnings, .. } = line {
+            for w in warnings {
+                eprintln!("{w}");
             }
-            ClassifiedLine::NoIp(s) => {
-                println!("{s}");
-            }
+        }
+
+        for rendered in render_line(line, &out_opts, &sort_opts) {
+            println!("{rendered}");
         }
     }
 }
