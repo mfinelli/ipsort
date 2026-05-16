@@ -15,9 +15,10 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+use blocks::sort_blocks;
 use classify::{ClassifiedLine, classify_line};
 use ipnet::IpNet;
-use ipsort::{classify, parse, sort};
+use ipsort::{blocks, classify, parse, sort};
 use sort::SortOptions;
 use std::str::FromStr;
 
@@ -117,6 +118,49 @@ fn main() {
             }
             ClassifiedLine::NoIp(s) => {
                 println!("NoIp      {s:?}");
+            }
+        }
+    }
+
+    let input = vec![
+        "# group one",
+        "192.168.1.0/24",
+        "10.0.0.0/8",
+        "172.16.0.0/12",
+        "",
+        "# group two",
+        "- 192.168.2.0/24",
+        "- 10.10.0.0/16",
+        "",
+        "# group three (mixed content lines)",
+        "network: 172.16.5.0/24 172.16.1.0/24",
+        "\"10.0.1.0/24\", \"10.0.2.0/24\"",
+    ];
+
+    let opts = SortOptions::default();
+
+    let classified: Vec<ClassifiedLine> = input
+        .iter()
+        .map(|line| classify_line(line, &opts))
+        .collect();
+
+    let sorted = sort_blocks(classified, &opts);
+
+    for line in &sorted {
+        match line {
+            ClassifiedLine::HasIp {
+                original,
+                sort_key,
+                warnings,
+                ..
+            } => {
+                for w in warnings {
+                    eprintln!("{w}");
+                }
+                println!("{original}  (sort_key={sort_key})");
+            }
+            ClassifiedLine::NoIp(s) => {
+                println!("{s}");
             }
         }
     }

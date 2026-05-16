@@ -15,6 +15,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+pub mod blocks;
 pub mod classify;
 pub mod parse;
 pub mod sort;
