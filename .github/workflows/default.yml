@@ -64,11 +64,14 @@ jobs:
             arm64)   echo "name=arm64" >> $GITHUB_OUTPUT ;;
             *)       echo "name=$ARCH" >> $GITHUB_OUTPUT ;;
           esac
+      - name: Set ref name
+        id: ref
+        run: echo "name=${GITHUB_REF_NAME%%/*}" >> $GITHUB_OUTPUT
       - name: Set archive name
         id: archive
         run: |
           NAME="ipsort"
-          NAME="${NAME}_${{ github.ref_name }}"
+          NAME="${NAME}_${{ steps.ref.outputs.name }}"
           NAME="${NAME}_${{ steps.os.outputs.name }}"
           NAME="${NAME}_${{ steps.arch.outputs.name }}"
           NAME="${NAME}.tar.zst"
@@ -81,13 +84,22 @@ jobs:
           elif [ "$RUNNER_OS" == "macOS" ]; then
             brew install scdoc
           fi
+      - name: Set tar
+        id: tar
+        run: |
+          if [ "$RUNNER_OS" == "macOS" ]; then
+            brew install gnu-tar
+            echo "cmd=gtar" >> $GITHUB_OUTPUT
+          else
+            echo "cmd=tar" >> $GITHUB_OUTPUT
+          fi
       - uses: crazy-max/ghaction-import-gpg@v6
         if: startsWith(github.ref, 'refs/tags/')
         with:
           gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
           passphrase: ${{ secrets.GPG_PASSPHRASE }}
       - run: cargo vendor --locked
-      - run: cargo doc --frozen --no-deps --release
+      - run: cargo doc --frozen --no-deps --release --document-private-items
       - run: make
       - run: |
           mkdir dist
@@ -99,7 +111,7 @@ jobs:
           cp -r vendor dist/
       - run: |
           cd dist
-          tar --owner=0 --group=0 --sort=name -acvf \
+          ${{ steps.tar.outputs.cmd }} --owner=0 --group=0 --sort=name -acvf \
             ../${{ steps.archive.outputs.name }} *
       - run: gpg -ba ${{ steps.archive.outputs.name }}
         if: startsWith(github.ref, 'refs/tags/')
