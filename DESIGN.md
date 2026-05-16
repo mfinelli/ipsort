@@ -159,12 +159,23 @@ In this case the user wants all four IPs sorted and redistributed across the ori
 
 **Rationale**: `ipsort` is intended to be used in workflows like `jq .field[] | ipsort | ...` where the tool is one step in a pipeline. Mangling the format would break downstream consumers. For structured formats (JSON, YAML), the recommended pattern is to use `jq` or `yq` to extract fields first, pipe through `ipsort`, and reconstruct — rather than having `ipsort` parse and re-serialize structured formats itself.
 
-### `--ips-only`
+### `--ips-only` and `--ips-only-with-structure`
 
-- Strip all `NonIp` spans and emit one bare IP address per line
-- Decoration, keys, punctuation, and surrounding text are discarded
+These two flags are mutually exclusive. If both are provided, `ipsort` exits with a non-zero error code.
+
+**`--ips-only`**: extract bare IP addresses, discard everything else.
+- All `NonIp` spans are discarded
+- All non-IP lines (`NoIp`) are discarded
+- The entire input is treated as a single flat pool — block separator logic does not apply
 - Each `Ip` span becomes one output line
-- **Rationale**: `--one-per-line` was the original name but was misleading — the flag doesn't just change line formatting, it strips all non-IP content entirely
+
+**`--ips-only-with-structure`**: strip decoration from lines but preserve document structure.
+- `NonIp` spans within `HasIp` lines are discarded (decoration stripped)
+- `NoIp` lines are preserved as block separators
+- Block separator logic applies normally
+- Each `Ip` span within a `HasIp` line becomes one output line per block
+
+**Rationale**: `--ips-only` does what it says — only IPs, nothing else. `--ips-only-with-structure` is for cases where you want bare addresses but need to preserve the block groupings from the original input. They are named to make the relationship between them obvious and are mutually exclusive rather than combined via a separate flag to avoid ambiguity.
 
 ### `--normalize`
 
@@ -191,10 +202,13 @@ In this case the user wants all four IPs sorted and redistributed across the ori
 |---|---|
 | `--inline` | Reorder all IP tokens freely across the entire input rather than sorting per block |
 | `--unique` / `-u` | Deduplicate by normalized CIDR, keeping first occurrence |
-| `--ips-only` | Strip all non-IP content and emit one bare address per line |
+| `--ips-only` | Discard all non-IP content and non-IP lines; emit one bare address per line |
+| `--ips-only-with-structure` | Strip decoration but preserve non-IP lines as block separators; emit one bare address per line |
 | `--normalize` | Emit canonical network strings (clears host bits, adds `/32`/`/128` to bare IPs) |
 | `--reverse` | Reverse the sort order |
 | `--ipv6-first` | In mixed IPv4/IPv6 input, sort IPv6 addresses before IPv4 |
+
+`--ips-only` and `--ips-only-with-structure` are mutually exclusive.
 
 ---
 
@@ -219,7 +233,7 @@ src/
 - **`Span`** — a single span within a line: `Ip(ParsedToken)` or `NonIp(String)`.
 - **`ClassifiedLine`** — a fully classified line: `HasIp { spans, sort_key, warnings }` or `NoIp(String)`.
 - **`SortOptions`** — runtime sort configuration: `ipv6_first`, `reverse`.
-- **`OutputOptions`** — runtime output configuration: `normalize`, `ips_only`.
+- **`OutputOptions`** — runtime output configuration: `normalize`, `ips_only: IpsOnlyMode`. `IpsOnlyMode` is an enum: `Off`, `Flat` (`--ips-only`), `WithStructure` (`--ips-only-with-structure`).
 
 ### Dependency Direction
 
@@ -262,6 +276,10 @@ Dropping lines silently could corrupt a YAML or config document in ways that are
 ### Why `--ips-only` instead of `--one-per-line`?
 
 `--one-per-line` implied only a formatting change. The actual behavior — stripping all non-IP decoration and emitting one bare address per output line — is more accurately described as extraction, not reformatting. `--ips-only` names what you get.
+
+### Why two separate flags instead of `--ips-only --preserve-structure`?
+
+`--preserve-structure` on its own has no meaning — structure is already preserved by default. A flag that only matters in combination with another flag is confusing. `--ips-only-with-structure` is self-contained: it says exactly what it does without requiring the user to reason about flag interactions. The two modes are mutually exclusive by design since their behaviours are fundamentally different, and naming them separately makes that obvious.
 
 ### Why preserve original token strings by default?
 

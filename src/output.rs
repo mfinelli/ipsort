@@ -20,7 +20,8 @@
 //! This module is responsible for converting sorted [`ClassifiedLine`] values
 //! back into strings for printing. It handles intra-line IP sorting
 //! (reordering the `Ip` spans within a single line), decoration preservation,
-//! and the output mode flags `--normalize` and `--ips-only`.
+//! and the output mode flags `--normalize`, `--ips-only`, and
+//! `--ips-only-with-structure`.
 //!
 //! # Rendering modes
 //! **Default**: `NonIp` spans are emitted verbatim; `Ip` spans are replaced
@@ -31,8 +32,15 @@
 //! (`10.0.0.5/8`). Bare IPs gain explicit prefix lengths (`192.168.1.1` ->
 //! `192.168.1.1/32`).
 //!
-//! **`--ips-only`**: `NonIp` spans are discarded entirely. Each `Ip` span
-//! becomes one output line. A line with two IPs produces two output lines.
+//! **`--ips-only`** ([`IpsOnlyMode::Flat`]): all `NonIp` spans and all
+//! [`ClassifiedLine::NoIp`] lines are discarded. Each `Ip` span becomes one
+//! output line. The entire input is treated as a single flat pool.
+//!
+//! **`--ips-only-with-structure`** ([`IpsOnlyMode::WithStructure`]): `NonIp`
+//! spans within `HasIp` lines are discarded but [`ClassifiedLine::NoIp`] lines
+//! are preserved as block separators. Each `Ip` span becomes one output line.
+//!
+//! `--ips-only` and `--ips-only-with-structure` are mutually exclusive.
 //!
 //! # Intra-line sorting
 //! [`render_line`] sorts the IP addresses within a line before substituting
@@ -44,26 +52,34 @@ use crate::classify::{ClassifiedLine, Span};
 use crate::parse::ParsedToken;
 use crate::sort::{SortOptions, compare};
 
+/// Controls whether and how non-IP content is stripped from output.
+///
+/// `--ips-only` and `--ips-only-with-structure` are mutually exclusive.
+/// The CLI layer is responsible for enforcing this.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub enum IpsOnlyMode {
+    /// Default: preserve all content, mirror input format.
+    #[default]
+    Off,
+    /// `--ips-only`: discard all non-IP content and non-IP lines.
+    /// Each `Ip` span becomes one output line. No block separators.
+    Flat,
+    /// `--ips-only-with-structure`: discard decoration within lines but
+    /// preserve `NoIp` lines as block separators.
+    /// Each `Ip` span becomes one output line per block.
+    WithStructure,
+}
+
 /// Runtime options controlling how lines are rendered to output strings.
 ///
 /// Construct with [`OutputOptions::default()`] for standard behaviour.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct OutputOptions {
     /// When `true`, emit canonical network strings instead of original tokens.
     /// Host bits are cleared and bare IPs gain explicit prefix lengths.
     pub normalize: bool,
-    /// When `true`, strip all non-IP content and emit one bare address per
-    /// output line. A `HasIp` line with N IP spans produces N output lines.
-    pub ips_only: bool,
-}
-
-impl Default for OutputOptions {
-    fn default() -> Self {
-        OutputOptions {
-            normalize: false,
-            ips_only: false,
-        }
-    }
+    /// Controls IP-extraction mode. See [`IpsOnlyMode`].
+    pub ips_only: IpsOnlyMode,
 }
 
 /// Return the string to emit for a single [`ParsedToken`] given output
@@ -82,20 +98,21 @@ fn render_token(token: &ParsedToken, opts: &OutputOptions) -> String {
     }
 }
 
-/// Render a single [`ClassifiedLine`] into one or more output strings.
+/// Render a single [`ClassifiedLine`] into zero or more output strings.
 ///
-/// Returns a `Vec<String>` because `--ips-only` mode can expand a single
-/// input line into multiple output lines (one per IP span). In all other
-/// modes the vec contains exactly one element.
+/// Returns a `Vec<String>` because ips-only modes can expand a single input
+/// line into multiple output lines (one per IP span), and `--ips-only` can
+/// collapse `NoIp` lines to nothing. In default mode the vec always contains
+/// exactly one element.
 ///
-/// For [`ClassifiedLine::NoIp`], the original line is returned unchanged.
+/// For [`ClassifiedLine::NoIp`]:
+/// - Default and `--ips-only-with-structure`: return the original line
+/// - `--ips-only`: return an empty vec (line is discarded)
 ///
 /// For [`ClassifiedLine::HasIp`]:
-/// - The `Ip` spans are collected, sorted using `sort_opts`, then substituted
-///   back into the span positions in sorted order
-/// - `NonIp` spans are emitted verbatim (unless `--ips-only` is set)
-/// - With `--ips-only`, `NonIp` spans are discarded and each `Ip` span
-///   produces one output line
+/// - Default: reconstruct the line with IPs sorted, decoration preserved
+/// - `--ips-only` or `--ips-only-with-structure`: emit one line per IP span,
+///   decoration discarded
 ///
 /// # Examples
 /// ```rust
@@ -116,7 +133,10 @@ pub fn render_line(
     sort_opts: &SortOptions,
 ) -> Vec<String> {
     match line {
-        ClassifiedLine::NoIp(s) => vec![s.clone()],
+        ClassifiedLine::NoIp(s) => match out_opts.ips_only {
+            IpsOnlyMode::Flat => vec![], // discard non-IP lines
+            IpsOnlyMode::Off | IpsOnlyMode::WithStructure => vec![s.clone()], // preserve as separator
+        },
         ClassifiedLine::HasIp { spans, .. } => {
             // Collect and sort IP tokens from this line
             let mut ip_tokens: Vec<&ParsedToken> = spans
@@ -133,27 +153,32 @@ pub fn render_line(
                 compare(a_net, b_net, sort_opts)
             });
 
-            if out_opts.ips_only {
-                // One output line per IP, decoration discarded
-                ip_tokens
-                    .iter()
-                    .map(|t| render_token(t, out_opts))
-                    .collect()
-            } else {
-                // Walk spans, substituting sorted IPs in order
-                let mut ip_iter = ip_tokens.into_iter();
-                let mut result = String::new();
-                for span in spans {
-                    match span {
-                        Span::Ip(_) => {
-                            if let Some(token) = ip_iter.next() {
-                                result.push_str(&render_token(token, out_opts));
-                            }
-                        }
-                        Span::NonIp(s) => result.push_str(s),
-                    }
+            match out_opts.ips_only {
+                IpsOnlyMode::Flat | IpsOnlyMode::WithStructure => {
+                    // One output line per IP, decoration discarded
+                    ip_tokens
+                        .iter()
+                        .map(|t| render_token(t, out_opts))
+                        .collect()
                 }
-                vec![result]
+                IpsOnlyMode::Off => {
+                    // Walk spans, substituting sorted IPs in order
+                    let mut ip_iter = ip_tokens.into_iter();
+                    let mut result = String::new();
+                    for span in spans {
+                        match span {
+                            Span::Ip(_) => {
+                                if let Some(token) = ip_iter.next() {
+                                    result.push_str(&render_token(
+                                        token, out_opts,
+                                    ));
+                                }
+                            }
+                            Span::NonIp(s) => result.push_str(s),
+                        }
+                    }
+                    vec![result]
+                }
             }
         }
     }
@@ -188,18 +213,45 @@ mod tests {
     }
 
     #[test]
-    fn test_no_ip_passthrough() {
+    fn test_no_ip_passthrough_default() {
         assert_eq!(render("# comment"), vec!["# comment"]);
     }
 
     #[test]
-    fn test_empty_line_passthrough() {
+    fn test_empty_line_passthrough_default() {
         assert_eq!(render(""), vec![""]);
     }
 
     #[test]
-    fn test_yaml_separator_passthrough() {
+    fn test_yaml_separator_passthrough_default() {
         assert_eq!(render("---"), vec!["---"]);
+    }
+
+    #[test]
+    fn test_no_ip_passthrough_with_structure() {
+        let opts = OutputOptions {
+            ips_only: IpsOnlyMode::WithStructure,
+            ..Default::default()
+        };
+        assert_eq!(render_with("# comment", &opts), vec!["# comment"]);
+    }
+
+    #[test]
+    fn test_no_ip_discarded_flat() {
+        let opts = OutputOptions {
+            ips_only: IpsOnlyMode::Flat,
+            ..Default::default()
+        };
+        assert_eq!(render_with("# comment", &opts), Vec::<String>::new());
+    }
+
+    #[test]
+    fn test_empty_line_discarded_flat() {
+        let opts = OutputOptions {
+            ips_only: IpsOnlyMode::Flat,
+            ..Default::default()
+        };
+        assert_eq!(render_with("", &opts), Vec::<String>::new());
     }
 
     #[test]
@@ -349,27 +401,27 @@ mod tests {
     }
 
     #[test]
-    fn test_ips_only_single_ip() {
+    fn test_ips_only_flat_single_ip() {
         let opts = OutputOptions {
-            ips_only: true,
+            ips_only: IpsOnlyMode::Flat,
             ..Default::default()
         };
         assert_eq!(render_with("10.0.0.0/8", &opts), vec!["10.0.0.0/8"]);
     }
 
     #[test]
-    fn test_ips_only_strips_decoration() {
+    fn test_ips_only_flat_strips_decoration() {
         let opts = OutputOptions {
-            ips_only: true,
+            ips_only: IpsOnlyMode::Flat,
             ..Default::default()
         };
         assert_eq!(render_with("- 10.0.0.0/8", &opts), vec!["10.0.0.0/8"]);
     }
 
     #[test]
-    fn test_ips_only_two_ips_two_lines() {
+    fn test_ips_only_flat_two_ips_two_lines() {
         let opts = OutputOptions {
-            ips_only: true,
+            ips_only: IpsOnlyMode::Flat,
             ..Default::default()
         };
         assert_eq!(
@@ -379,9 +431,9 @@ mod tests {
     }
 
     #[test]
-    fn test_ips_only_strips_yaml_key() {
+    fn test_ips_only_flat_strips_yaml_key() {
         let opts = OutputOptions {
-            ips_only: true,
+            ips_only: IpsOnlyMode::Flat,
             ..Default::default()
         };
         assert_eq!(
@@ -391,39 +443,78 @@ mod tests {
     }
 
     #[test]
-    fn test_ips_only_no_ip_line_passthrough() {
+    fn test_ips_only_flat_preserves_original_token() {
         let opts = OutputOptions {
-            ips_only: true,
-            ..Default::default()
-        };
-        assert_eq!(render_with("# comment", &opts), vec!["# comment"]);
-    }
-
-    #[test]
-    fn test_ips_only_preserves_original_by_default() {
-        let opts = OutputOptions {
-            ips_only: true,
+            ips_only: IpsOnlyMode::Flat,
             ..Default::default()
         };
         assert_eq!(render_with("10.0.0.5/24", &opts), vec!["10.0.0.5/24"]);
     }
 
     #[test]
-    fn test_ips_only_with_normalize() {
+    fn test_ips_only_with_structure_single_ip() {
         let opts = OutputOptions {
-            ips_only: true,
+            ips_only: IpsOnlyMode::WithStructure,
+            ..Default::default()
+        };
+        assert_eq!(render_with("10.0.0.0/8", &opts), vec!["10.0.0.0/8"]);
+    }
+
+    #[test]
+    fn test_ips_only_with_structure_strips_decoration() {
+        let opts = OutputOptions {
+            ips_only: IpsOnlyMode::WithStructure,
+            ..Default::default()
+        };
+        assert_eq!(render_with("- 10.0.0.0/8", &opts), vec!["10.0.0.0/8"]);
+    }
+
+    #[test]
+    fn test_ips_only_with_structure_two_ips_two_lines() {
+        let opts = OutputOptions {
+            ips_only: IpsOnlyMode::WithStructure,
+            ..Default::default()
+        };
+        assert_eq!(
+            render_with("192.168.0.0/16 10.0.0.0/8", &opts),
+            vec!["10.0.0.0/8", "192.168.0.0/16"]
+        );
+    }
+
+    #[test]
+    fn test_ips_only_with_structure_preserves_no_ip_line() {
+        let opts = OutputOptions {
+            ips_only: IpsOnlyMode::WithStructure,
+            ..Default::default()
+        };
+        assert_eq!(render_with("# comment", &opts), vec!["# comment"]);
+    }
+
+    #[test]
+    fn test_ips_only_flat_with_normalize() {
+        let opts = OutputOptions {
+            ips_only: IpsOnlyMode::Flat,
             normalize: true,
         };
         assert_eq!(render_with("- 10.0.0.5/24", &opts), vec!["10.0.0.0/24"]);
     }
 
     #[test]
-    fn test_ips_only_normalize_bare_ip() {
+    fn test_ips_only_flat_normalize_bare_ip() {
         let opts = OutputOptions {
-            ips_only: true,
+            ips_only: IpsOnlyMode::Flat,
             normalize: true,
         };
         assert_eq!(render_with("192.168.1.1", &opts), vec!["192.168.1.1/32"]);
+    }
+
+    #[test]
+    fn test_ips_only_with_structure_normalize() {
+        let opts = OutputOptions {
+            ips_only: IpsOnlyMode::WithStructure,
+            normalize: true,
+        };
+        assert_eq!(render_with("- 10.0.0.5/24", &opts), vec!["10.0.0.0/24"]);
     }
 
     #[test]
@@ -454,14 +545,23 @@ mod tests {
     }
 
     #[test]
-    fn test_no_ip_returns_one_element_vec() {
+    fn test_no_ip_default_returns_one_element_vec() {
         assert_eq!(render("# comment").len(), 1);
     }
 
     #[test]
-    fn test_ips_only_two_ips_returns_two_element_vec() {
+    fn test_no_ip_flat_returns_empty_vec() {
         let opts = OutputOptions {
-            ips_only: true,
+            ips_only: IpsOnlyMode::Flat,
+            ..Default::default()
+        };
+        assert_eq!(render_with("# comment", &opts).len(), 0);
+    }
+
+    #[test]
+    fn test_two_ips_flat_returns_two_element_vec() {
+        let opts = OutputOptions {
+            ips_only: IpsOnlyMode::Flat,
             ..Default::default()
         };
         assert_eq!(render_with("10.0.0.0/8 192.168.0.0/16", &opts).len(), 2);
