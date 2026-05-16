@@ -123,7 +123,7 @@ fn flush_buffer(
         };
         compare(a_key, b_key, opts)
     });
-    output.extend(buffer.drain(..));
+    output.append(buffer);
 }
 
 /// Error returned when `--unique` encounters an ambiguous duplicate on a
@@ -182,12 +182,12 @@ pub fn deduplicate_blocks(
                     match &span {
                         Span::NonIp(_) => deduped_spans.push(span),
                         Span::Ip(t) => {
-                            if let Some(net) = t.network().copied() {
-                                if intra_seen.insert(net) {
-                                    deduped_spans.push(span);
-                                }
-                                // else: intra-line duplicate, silently drop
+                            if let Some(net) = t.network().copied()
+                                && intra_seen.insert(net)
+                            {
+                                deduped_spans.push(span);
                             }
+                            // else: intra-line duplicate, silently drop
                         }
                     }
                 }

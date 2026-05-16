@@ -42,7 +42,7 @@ use std::net::IpAddr;
 ///
 /// Pass this to [`compare`] to control sort behaviour. Construct with
 /// [`SortOptions::default()`] for standard IPv4-first ordering.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct SortOptions {
     /// When `true`, IPv6 addresses sort before IPv4 addresses in mixed input.
     /// Defaults to `false` (IPv4 first).
@@ -51,15 +51,6 @@ pub struct SortOptions {
     /// ordering rules, so the full ordering is simply inverted.
     /// Defaults to `false`.
     pub reverse: bool,
-}
-
-impl Default for SortOptions {
-    fn default() -> Self {
-        SortOptions {
-            ipv6_first: false,
-            reverse: false,
-        }
-    }
 }
 
 /// Compare two [`IpNet`] values according to `opts`.

@@ -81,8 +81,8 @@ fn main() {
     }
 
     // Validate: stdin + positional args are mutually exclusive
-    let has_args = !cli.addresses.is_empty()
-        && !(cli.addresses.len() == 1 && cli.addresses[0] == "-");
+    let has_args = !(cli.addresses.is_empty()
+        || cli.addresses.len() == 1 && cli.addresses[0] == "-");
 
     // Read input into lines
     let lines: Vec<String> = if has_args {
