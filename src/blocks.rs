@@ -141,9 +141,9 @@ pub struct DeduplicateError {
 ///   [`IpsOnlyMode::WithStructure`]): each IP is checked independently; seen
 ///   IPs are skipped, unseen IPs are kept. No error.
 /// - **Multi-IP line, default mode**: if **any** IP has been seen, returns a
-///   [`DeduplicateError`]: the ambiguity of which IP to remove and how to
+///   [`DeduplicateError`] (the ambiguity of which IP to remove and how to
 ///   handle the surrounding decoration requires the user to clean up their
-///   input.
+///   input).
 /// - **`NoIp` lines**: always passed through unchanged.
 ///
 /// Must be called **after** [`sort_blocks`] so that duplicates are adjacent
@@ -160,10 +160,31 @@ pub fn deduplicate_blocks(
             ClassifiedLine::NoIp(_) => output.push(line),
             ClassifiedLine::HasIp {
                 spans,
-                sort_key,
+                sort_key: _,
                 warnings,
             } => {
-                let ips: Vec<IpNet> = spans
+                // Step 1: intra-line dedup (remove duplicate IPs within this
+                // line regardless of mode). Safe because there is no
+                // ambiguity about which line to drop when duplicates are on
+                // the same line.
+                let mut intra_seen: HashSet<IpNet> = HashSet::new();
+                let mut deduped_spans: Vec<Span> = Vec::new();
+                for span in spans {
+                    match &span {
+                        Span::NonIp(_) => deduped_spans.push(span),
+                        Span::Ip(t) => {
+                            if let Some(net) = t.network().copied() {
+                                if intra_seen.insert(net) {
+                                    deduped_spans.push(span);
+                                }
+                                // else: intra-line duplicate, silently drop
+                            }
+                        }
+                    }
+                }
+
+                // Recalculate IPs and sort_key from deduped spans
+                let ips: Vec<IpNet> = deduped_spans
                     .iter()
                     .filter_map(|s| match s {
                         Span::Ip(t) => t.network().copied(),
@@ -171,13 +192,25 @@ pub fn deduplicate_blocks(
                     })
                     .collect();
 
+                if ips.is_empty() {
+                    // All IPs were intra-line dupes (drop the line entirely)
+                    continue;
+                }
+
+                let sort_key = ips
+                    .iter()
+                    .min_by(|a, b| compare(a, b, &SortOptions::default()))
+                    .copied()
+                    .unwrap();
+
+                let spans = deduped_spans;
                 let is_multi_ip = ips.len() > 1;
 
+                // Step 2: inter-line dedup against the global seen set
                 match ips_only {
                     IpsOnlyMode::Flat | IpsOnlyMode::WithStructure => {
-                        // Per-IP dedup: filter seen IPs out of the line's
-                        // spans and rebuild. If all IPs are dupes, drop the
-                        // line.
+                        // Per-IP dedup: filter seen IPs out of the line's spans
+                        // and rebuild. If all IPs are dupes, drop the line.
                         let mut any_kept = false;
                         let mut new_spans: Vec<Span> = Vec::new();
                         let mut ip_iter = ips.iter();
@@ -319,6 +352,21 @@ mod tests {
         lines: Vec<ClassifiedLine>,
     ) -> Result<Vec<ClassifiedLine>, DeduplicateError> {
         deduplicate_blocks(lines, &IpsOnlyMode::Flat)
+    }
+
+    fn dedup_off(
+        lines: Vec<ClassifiedLine>,
+    ) -> Result<Vec<ClassifiedLine>, DeduplicateError> {
+        deduplicate_blocks(lines, &IpsOnlyMode::Off)
+    }
+
+    fn ip_count(line: &ClassifiedLine) -> usize {
+        match line {
+            ClassifiedLine::HasIp { spans, .. } => {
+                spans.iter().filter(|s| matches!(s, Span::Ip(_))).count()
+            }
+            ClassifiedLine::NoIp(_) => 0,
+        }
     }
 
     #[test]
@@ -652,5 +700,62 @@ mod tests {
         // First line unchanged, second line only has 172.16.0.0/12
         assert_eq!(result.len(), 2);
         assert_eq!(sort_key(&result[1]), net("172.16.0.0/12"));
+    }
+
+    #[test]
+    fn test_intra_line_dup_removed_off_mode() {
+        let lines = vec![classify("10.0.0.0/8 10.0.0.0/8 192.168.0.0/16")];
+        let result = dedup_off(lines).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(ip_count(&result[0]), 2);
+        assert_eq!(sort_key(&result[0]), net("10.0.0.0/8"));
+    }
+
+    #[test]
+    fn test_intra_line_all_same_ips_becomes_single() {
+        let lines = vec![classify("10.0.0.0/8 10.0.0.0/8")];
+        let result = dedup_off(lines).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(ip_count(&result[0]), 1);
+    }
+
+    #[test]
+    fn test_intra_line_single_arg_dedup() {
+        let lines = vec![classify("10.10.10.10/32 10.10.10.10/32")];
+        let result = dedup_off(lines).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(ip_count(&result[0]), 1);
+        assert_eq!(sort_key(&result[0]), net("10.10.10.10/32"));
+    }
+
+    #[test]
+    fn test_intra_line_dedup_then_inter_line_dedup() {
+        // Line 1: 10.0.0.0/8 (single)
+        // Line 2: 10.0.0.0/8 10.0.0.0/8 192.168.0.0/16
+        //   -> after intra dedup: 10.0.0.0/8 192.168.0.0/16
+        //   -> 10.0.0.0/8 is now an inter-line dup (error in Off mode)
+        let lines = vec![
+            classify("10.0.0.0/8"),
+            classify("10.0.0.0/8 10.0.0.0/8 192.168.0.0/16"),
+        ];
+        assert!(dedup_off(lines).is_err());
+    }
+
+    #[test]
+    fn test_intra_line_dedup_flat_mode() {
+        let lines = vec![classify("10.0.0.0/8 10.0.0.0/8 192.168.0.0/16")];
+        let result = dedup_flat(lines).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(ip_count(&result[0]), 2);
+    }
+
+    #[test]
+    fn test_intra_line_all_dupes_line_dropped() {
+        // All IPs are the same: after intra dedup only one remains,
+        // then inter dedup sees it's new, so line is kept with one IP
+        let lines = vec![classify("10.0.0.0/8 10.0.0.0/8")];
+        let result = dedup_off(lines).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(ip_count(&result[0]), 1);
     }
 }
