@@ -47,9 +47,16 @@
 //! `sort_blocks` is a pure transformation and does not check whether any IP
 //! addresses were found. The caller is responsible for erroring if the input
 //! contained no IP addresses at all.
+//!
+//! `deduplicate_blocks` returns a [`DeduplicateError`] if a duplicate is found
+//! on a multi-IP line in non-ips-only mode, since the correct action is
+//! ambiguous and silently dropping content would be surprising.
 
-use crate::classify::ClassifiedLine;
+use crate::classify::{ClassifiedLine, Span};
+use crate::output::IpsOnlyMode;
 use crate::sort::{SortOptions, compare};
+use ipnet::IpNet;
+use std::collections::HashSet;
 
 /// Sort [`ClassifiedLine::HasIp`] lines within each block, preserving
 /// [`ClassifiedLine::NoIp`] lines as block separators in their original
@@ -110,10 +117,160 @@ fn flush_buffer(
     output.extend(buffer.drain(..));
 }
 
+/// Error returned when `--unique` encounters an ambiguous duplicate on a
+/// multi-IP line in non-ips-only mode.
+///
+/// The caller should print `line` and `duplicate_ip` in a helpful error
+/// message and exit with a non-zero status code.
+#[derive(Debug)]
+pub struct DeduplicateError {
+    /// The original line content that caused the error.
+    pub line: String,
+    /// The normalized CIDR that was already seen.
+    pub duplicate_ip: IpNet,
+}
+
+/// Deduplicate [`ClassifiedLine::HasIp`] lines, removing lines whose IPs have
+/// already been seen in the output.
+///
+/// Behaviour depends on the number of IPs on a line and the output mode:
+///
+/// - **Single-IP line**: if the IP has been seen, the line is silently
+///   dropped.
+/// - **Multi-IP line, `--ips-only`** ([`IpsOnlyMode::Flat`] or
+///   [`IpsOnlyMode::WithStructure`]): each IP is checked independently; seen
+///   IPs are skipped, unseen IPs are kept. No error.
+/// - **Multi-IP line, default mode**: if **any** IP has been seen, returns a
+///   [`DeduplicateError`]: the ambiguity of which IP to remove and how to
+///   handle the surrounding decoration requires the user to clean up their
+///   input.
+/// - **`NoIp` lines**: always passed through unchanged.
+///
+/// Must be called **after** [`sort_blocks`] so that duplicates are adjacent
+/// and the seen set grows in sorted order.
+pub fn deduplicate_blocks(
+    lines: Vec<ClassifiedLine>,
+    ips_only: &IpsOnlyMode,
+) -> Result<Vec<ClassifiedLine>, DeduplicateError> {
+    let mut seen: HashSet<IpNet> = HashSet::new();
+    let mut output: Vec<ClassifiedLine> = Vec::with_capacity(lines.len());
+
+    for line in lines {
+        match line {
+            ClassifiedLine::NoIp(_) => output.push(line),
+            ClassifiedLine::HasIp {
+                spans,
+                sort_key,
+                warnings,
+            } => {
+                let ips: Vec<IpNet> = spans
+                    .iter()
+                    .filter_map(|s| match s {
+                        Span::Ip(t) => t.network().copied(),
+                        Span::NonIp(_) => None,
+                    })
+                    .collect();
+
+                let is_multi_ip = ips.len() > 1;
+
+                match ips_only {
+                    IpsOnlyMode::Flat | IpsOnlyMode::WithStructure => {
+                        // Per-IP dedup: filter seen IPs out of the line's
+                        // spans and rebuild. If all IPs are dupes, drop the
+                        // line.
+                        let mut any_kept = false;
+                        let mut new_spans: Vec<Span> = Vec::new();
+                        let mut ip_iter = ips.iter();
+
+                        for span in spans {
+                            match &span {
+                                Span::NonIp(_) => new_spans.push(span),
+                                Span::Ip(_) => {
+                                    let net = ip_iter.next().unwrap();
+                                    if seen.contains(net) {
+                                        // skip this IP span
+                                    } else {
+                                        seen.insert(*net);
+                                        any_kept = true;
+                                        new_spans.push(span);
+                                    }
+                                }
+                            }
+                        }
+
+                        if any_kept {
+                            // Recalculate sort_key from remaining spans
+                            let new_sort_key = new_spans
+                                .iter()
+                                .filter_map(|s| match s {
+                                    Span::Ip(t) => t.network().copied(),
+                                    Span::NonIp(_) => None,
+                                })
+                                .min_by(|a, b| {
+                                    compare(a, b, &SortOptions::default())
+                                })
+                                .unwrap();
+
+                            output.push(ClassifiedLine::HasIp {
+                                spans: new_spans,
+                                sort_key: new_sort_key,
+                                warnings,
+                            });
+                        }
+                    }
+                    IpsOnlyMode::Off => {
+                        if is_multi_ip {
+                            // Error on any seen IP
+                            for net in &ips {
+                                if seen.contains(net) {
+                                    let line_str: String = spans
+                                        .iter()
+                                        .map(|s| match s {
+                                            Span::Ip(t) => t.original(),
+                                            Span::NonIp(s) => s.as_str(),
+                                        })
+                                        .collect();
+                                    return Err(DeduplicateError {
+                                        line: line_str,
+                                        duplicate_ip: *net,
+                                    });
+                                }
+                            }
+                            // No dupes (add all and keep line)
+                            for net in &ips {
+                                seen.insert(*net);
+                            }
+                            output.push(ClassifiedLine::HasIp {
+                                spans,
+                                sort_key,
+                                warnings,
+                            });
+                        } else {
+                            // Single-IP line: silently drop if seen
+                            let net = ips[0];
+                            if !seen.contains(&net) {
+                                seen.insert(net);
+                                output.push(ClassifiedLine::HasIp {
+                                    spans,
+                                    sort_key,
+                                    warnings,
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(output)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::classify::classify_line;
+    use crate::output::IpsOnlyMode;
     use crate::sort::SortOptions;
     use ipnet::IpNet;
     use std::str::FromStr;
@@ -150,6 +307,18 @@ mod tests {
 
     fn net(s: &str) -> IpNet {
         IpNet::from_str(s).unwrap()
+    }
+
+    fn dedup(
+        lines: Vec<ClassifiedLine>,
+    ) -> Result<Vec<ClassifiedLine>, DeduplicateError> {
+        deduplicate_blocks(lines, &IpsOnlyMode::Off)
+    }
+
+    fn dedup_flat(
+        lines: Vec<ClassifiedLine>,
+    ) -> Result<Vec<ClassifiedLine>, DeduplicateError> {
+        deduplicate_blocks(lines, &IpsOnlyMode::Flat)
     }
 
     #[test]
@@ -349,5 +518,139 @@ mod tests {
         let result = sort_blocks(lines, &opts());
         assert_eq!(original(&result[0]), "- 10.0.0.0/8");
         assert_eq!(original(&result[1]), "- 192.168.0.0/16");
+    }
+
+    #[test]
+    fn test_no_duplicates_unchanged() {
+        let lines = vec![classify("10.0.0.0/8"), classify("192.168.0.0/16")];
+        let result = dedup(lines).unwrap();
+        assert_eq!(result.len(), 2);
+    }
+
+    #[test]
+    fn test_duplicate_single_ip_dropped() {
+        let lines = vec![
+            classify("10.0.0.0/8"),
+            classify("10.0.0.0/8"),
+            classify("192.168.0.0/16"),
+        ];
+        let result = dedup(lines).unwrap();
+        assert_eq!(result.len(), 2);
+        assert_eq!(sort_key(&result[0]), net("10.0.0.0/8"));
+        assert_eq!(sort_key(&result[1]), net("192.168.0.0/16"));
+    }
+
+    #[test]
+    fn test_host_bits_normalized_for_dedup() {
+        // 10.0.0.5/24 and 10.0.0.0/24 are the same after normalization
+        let lines = vec![classify("10.0.0.0/24"), classify("10.0.0.5/24")];
+        let result = dedup(lines).unwrap();
+        assert_eq!(result.len(), 1);
+    }
+
+    #[test]
+    fn test_different_prefix_lengths_not_deduped() {
+        // 10.0.0.0/8 and 10.0.0.0/24 are different
+        let lines = vec![classify("10.0.0.0/8"), classify("10.0.0.0/24")];
+        let result = dedup(lines).unwrap();
+        assert_eq!(result.len(), 2);
+    }
+
+    #[test]
+    fn test_no_ip_lines_pass_through() {
+        let lines = vec![
+            classify("10.0.0.0/8"),
+            classify("# comment"),
+            classify("10.0.0.0/8"),
+        ];
+        let result = dedup(lines).unwrap();
+        assert_eq!(result.len(), 2); // comment + first IP, second IP dropped
+        assert!(matches!(&result[1], ClassifiedLine::NoIp(_)));
+    }
+
+    #[test]
+    fn test_decorated_duplicate_dropped() {
+        let lines = vec![classify("- 10.0.0.0/8"), classify("- 10.0.0.0/8")];
+        let result = dedup(lines).unwrap();
+        assert_eq!(result.len(), 1);
+    }
+
+    #[test]
+    fn test_multi_ip_duplicate_errors() {
+        let lines = vec![
+            classify("10.0.0.0/8"),
+            classify("192.168.0.0/16 10.0.0.0/8"),
+        ];
+        assert!(dedup(lines).is_err());
+    }
+
+    #[test]
+    fn test_multi_ip_error_contains_duplicate_ip() {
+        let lines = vec![
+            classify("10.0.0.0/8"),
+            classify("192.168.0.0/16 10.0.0.0/8"),
+        ];
+        let err = dedup(lines).unwrap_err();
+        assert_eq!(err.duplicate_ip, net("10.0.0.0/8"));
+    }
+
+    #[test]
+    fn test_multi_ip_no_duplicates_ok() {
+        let lines = vec![
+            classify("10.0.0.0/8 192.168.0.0/16"),
+            classify("172.16.0.0/12"),
+        ];
+        assert!(dedup(lines).is_ok());
+    }
+
+    #[test]
+    fn test_multi_ip_non_sort_key_duplicate_also_errors() {
+        // 192.168.0.0/16 is not the sort key of the second line but is still a
+        // dupe
+        let lines = vec![
+            classify("192.168.0.0/16"),
+            classify("10.0.0.0/8 192.168.0.0/16"),
+        ];
+        assert!(dedup(lines).is_err());
+    }
+
+    #[test]
+    fn test_ips_only_duplicate_skipped_not_errored() {
+        let lines = vec![
+            classify("10.0.0.0/8"),
+            classify("192.168.0.0/16 10.0.0.0/8"),
+        ];
+        assert!(dedup_flat(lines).is_ok());
+    }
+
+    #[test]
+    fn test_ips_only_duplicate_ip_removed_from_line() {
+        let lines = vec![
+            classify("10.0.0.0/8"),
+            classify("192.168.0.0/16 10.0.0.0/8"),
+        ];
+        let result = dedup_flat(lines).unwrap();
+        // Second line should only have 192.168.0.0/16
+        assert_eq!(result.len(), 2);
+        assert_eq!(sort_key(&result[1]), net("192.168.0.0/16"));
+    }
+
+    #[test]
+    fn test_ips_only_all_dupes_line_dropped() {
+        let lines = vec![classify("10.0.0.0/8"), classify("10.0.0.0/8")];
+        let result = dedup_flat(lines).unwrap();
+        assert_eq!(result.len(), 1);
+    }
+
+    #[test]
+    fn test_ips_only_partial_dedup_keeps_unique_ips() {
+        let lines = vec![
+            classify("10.0.0.0/8 192.168.0.0/16"),
+            classify("10.0.0.0/8 172.16.0.0/12"),
+        ];
+        let result = dedup_flat(lines).unwrap();
+        // First line unchanged, second line only has 172.16.0.0/12
+        assert_eq!(result.len(), 2);
+        assert_eq!(sort_key(&result[1]), net("172.16.0.0/12"));
     }
 }

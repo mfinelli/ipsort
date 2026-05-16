@@ -17,7 +17,7 @@
 
 use clap::{CommandFactory, Parser};
 use clap_complete::{Shell, generate};
-use ipsort::blocks::sort_blocks;
+use ipsort::blocks::{deduplicate_blocks, sort_blocks};
 use ipsort::classify::{ClassifiedLine, classify_line};
 use ipsort::output::{IpsOnlyMode, OutputOptions, render_line};
 use ipsort::sort::SortOptions;
@@ -107,10 +107,6 @@ fn main() {
         eprintln!("ipsort: --inline is not yet implemented");
         std::process::exit(1);
     }
-    if cli.unique {
-        eprintln!("ipsort: --unique is not yet implemented");
-        std::process::exit(1);
-    }
 
     let sort_opts = SortOptions {
         ipv6_first: cli.ipv6_first,
@@ -145,6 +141,25 @@ fn main() {
 
     // Sort blocks
     let sorted = sort_blocks(classified, &sort_opts);
+
+    // Deduplicate if requested
+    let sorted = if cli.unique {
+        match deduplicate_blocks(sorted, &out_opts.ips_only) {
+            Ok(lines) => lines,
+            Err(e) => {
+                eprintln!(
+                    "ipsort: --unique: duplicate IP {} found on multi-IP line {:?}",
+                    e.duplicate_ip, e.line
+                );
+                eprintln!(
+                    "ipsort: --unique: cannot determine which IP to remove; clean up input and try again"
+                );
+                std::process::exit(1);
+            }
+        }
+    } else {
+        sorted
+    };
 
     // Render and print
     for line in &sorted {
