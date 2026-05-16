@@ -191,8 +191,27 @@ These two flags are mutually exclusive. If both are provided, `ipsort` exits wit
   - e.g. `10.0.0.5/24` and `10.0.0.0/24` are considered equal after normalization
   - `10.0.0.0/8` and `10.0.0.0/24` are **not** equal (different prefix length)
 - When deduplicating, the **first occurrence** is kept
-- Applies globally, including in `--inline` mode
 - **Rationale**: comparing original strings is too strict (misses formatting variants); comparing only network address would incorrectly collapse different-sized blocks. Normalized CIDR is the right unit of identity.
+
+#### Intra-line deduplication (always applied)
+
+Before inter-line dedup runs, duplicate IPs within a single line are silently removed regardless of output mode. This is always unambiguous — there is no question of which line to drop when duplicates are on the same line. For example `"10.0.0.0/8 10.0.0.0/8 192.168.0.0/16"` becomes `"10.0.0.0/8 192.168.0.0/16"`.
+
+#### Inter-line deduplication
+
+After intra-line dedup, lines are checked against a global seen set:
+
+- **Single-IP line**: if the IP has been seen, the line is silently dropped
+- **Multi-IP line, default mode**: if **any** IP has been seen, `ipsort` exits with an error — the ambiguity of which IP to remove and what to do with surrounding decoration requires the user to clean up input
+- **Multi-IP line, `--ips-only` or `--ips-only-with-structure`**: each IP is checked independently; seen IPs are removed, unseen IPs are kept. No error, since decoration is being discarded anyway.
+
+#### Known limitation: dangling NonIp spans
+
+When an IP is removed from a multi-IP line in `--ips-only` or `--ips-only-with-structure` mode, adjacent `NonIp` separators (spaces, commas, etc.) that were between IPs may remain in the output. For example `"10.0.0.0/8, 10.0.0.0/8, 192.168.0.0/16"` after dedup may produce `"10.0.0.0/8, 192.168.0.0/16"` or `"10.0.0.0/8,  192.168.0.0/16"` depending on span boundaries. Users who need clean output in this case should use `--ips-only` to strip all decoration.
+
+#### `--unique` with `--inline`
+
+In `--inline` mode, all IPs are collected into a global pool before redistribution. Deduplication operates on this pool before IPs are reinserted into span positions. Lines that become empty after dedup are kept in place (consistent with `--inline` behavior).
 
 ---
 
