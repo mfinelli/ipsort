@@ -29,7 +29,8 @@ use std::io::{self, BufRead, IsTerminal};
     about = "Sort IP addresses and CIDRs numerically",
     long_about = "Sort IP addresses and CIDRs by their actual numeric value.\n\
                   Accepts input from stdin or positional arguments.\n\
-                  Use '-' to read explicitly from stdin."
+                  Use '-' to read explicitly from stdin.",
+    version
 )]
 struct Cli {
     /// Input CIDRs. Pass one or more addresses, a comma/space-separated list,
