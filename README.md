@@ -1,5 +1,7 @@
 # ipsort
 
+![CI](https://github.com/mfinelli/ipsort/actions/workflows/default.yml/badge.svg)
+
 `ipsort` sorts IP addresses and CIDR blocks by their actual numeric value rather
 than lexicographically. It handles plain lists, YAML and JSON list items, inline
 config values, and other mixed content, preserving surrounding decoration while
