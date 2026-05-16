@@ -323,7 +323,10 @@ mod tests {
 
     #[test]
     fn test_mixed_ipv6_first_flag() {
-        let opts = SortOptions { ipv6_first: true };
+        let opts = SortOptions {
+            ipv6_first: true,
+            reverse: false,
+        };
         let lines = vec![classify("10.0.0.0/8"), classify("2001:db8::/32")];
         let result = sort_blocks(lines, &opts);
         assert_eq!(sort_key(&result[0]), net("2001:db8::/32"));

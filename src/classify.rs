@@ -496,7 +496,10 @@ mod tests {
 
     #[test]
     fn test_mixed_ipv4_ipv6_sort_key_ipv6_first_flag() {
-        let opts = SortOptions { ipv6_first: true };
+        let opts = SortOptions {
+            ipv6_first: true,
+            reverse: false,
+        };
         match classify_line("2001:db8::/32 10.0.0.0/8", &opts) {
             ClassifiedLine::HasIp { sort_key, .. } => {
                 assert_eq!(sort_key, IpNet::from_str("2001:db8::/32").unwrap());

@@ -532,7 +532,10 @@ mod tests {
 
     #[test]
     fn test_mixed_ipv6_first_flag() {
-        let sort_opts = SortOptions { ipv6_first: true };
+        let sort_opts = SortOptions {
+            ipv6_first: true,
+            reverse: false,
+        };
         assert_eq!(
             render_with_sort("10.0.0.0/8 2001:db8::/32", &sort_opts),
             vec!["2001:db8::/32 10.0.0.0/8"]

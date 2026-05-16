@@ -31,6 +31,8 @@
 //! 3. **Prefix length**: when two addresses have the same network address,
 //!    the shorter prefix (larger block) comes first. So `10.0.0.0/8` sorts
 //!    before `10.0.0.0/24`.
+//!
+//! The final result can be reversed with [`SortOptions::reverse`].
 
 use ipnet::IpNet;
 use std::cmp::Ordering;
@@ -45,11 +47,18 @@ pub struct SortOptions {
     /// When `true`, IPv6 addresses sort before IPv4 addresses in mixed input.
     /// Defaults to `false` (IPv4 first).
     pub ipv6_first: bool,
+    /// When `true`, the sort order is reversed. Applied after all other
+    /// ordering rules, so the full ordering is simply inverted.
+    /// Defaults to `false`.
+    pub reverse: bool,
 }
 
 impl Default for SortOptions {
     fn default() -> Self {
-        SortOptions { ipv6_first: false }
+        SortOptions {
+            ipv6_first: false,
+            reverse: false,
+        }
     }
 }
 
@@ -79,7 +88,7 @@ pub fn compare(a: &IpNet, b: &IpNet, opts: &SortOptions) -> Ordering {
 
     // Step 1: order by IP family
     if a_is_v4 != b_is_v4 {
-        return if opts.ipv6_first {
+        let family_order = if opts.ipv6_first {
             // IPv6 first: v6 < v4
             if a_is_v4 {
                 Ordering::Greater
@@ -93,6 +102,11 @@ pub fn compare(a: &IpNet, b: &IpNet, opts: &SortOptions) -> Ordering {
             } else {
                 Ordering::Greater
             }
+        };
+        return if opts.reverse {
+            family_order.reverse()
+        } else {
+            family_order
         };
     }
 
@@ -113,11 +127,22 @@ pub fn compare(a: &IpNet, b: &IpNet, opts: &SortOptions) -> Ordering {
     };
 
     if addr_order != Ordering::Equal {
-        return addr_order;
+        return if opts.reverse {
+            addr_order.reverse()
+        } else {
+            addr_order
+        };
     }
 
     // Step 3: same network address - shorter prefix (larger block) first
-    a.prefix_len().cmp(&b.prefix_len())
+    let result = a.prefix_len().cmp(&b.prefix_len());
+
+    // Apply reverse after all other ordering rules
+    if opts.reverse {
+        result.reverse()
+    } else {
+        result
+    }
 }
 
 #[cfg(test)]
@@ -134,7 +159,17 @@ mod tests {
     }
 
     fn opts_v6_first() -> SortOptions {
-        SortOptions { ipv6_first: true }
+        SortOptions {
+            ipv6_first: true,
+            reverse: false,
+        }
+    }
+
+    fn opts_reverse() -> SortOptions {
+        SortOptions {
+            reverse: true,
+            ..Default::default()
+        }
     }
 
     #[test]
@@ -332,8 +367,95 @@ mod tests {
 
     #[test]
     fn test_sort_options_clone() {
-        let a = SortOptions { ipv6_first: true };
+        let a = SortOptions {
+            ipv6_first: true,
+            reverse: false,
+        };
         let b = a.clone();
         assert_eq!(a, b);
+    }
+
+    #[test]
+    fn test_reverse_default_is_false() {
+        assert!(!SortOptions::default().reverse);
+    }
+
+    #[test]
+    fn test_reverse_network_address() {
+        // Without reverse: 10.x < 192.x
+        // With reverse: 192.x < 10.x
+        assert_eq!(
+            compare(
+                &net("10.0.0.0/8"),
+                &net("192.168.0.0/16"),
+                &opts_reverse()
+            ),
+            Ordering::Greater
+        );
+    }
+
+    #[test]
+    fn test_reverse_network_address_other_direction() {
+        assert_eq!(
+            compare(
+                &net("192.168.0.0/16"),
+                &net("10.0.0.0/8"),
+                &opts_reverse()
+            ),
+            Ordering::Less
+        );
+    }
+
+    #[test]
+    fn test_reverse_prefix_length() {
+        // Without reverse: /8 < /24 (shorter prefix first)
+        // With reverse: /24 < /8
+        assert_eq!(
+            compare(&net("10.0.0.0/8"), &net("10.0.0.0/24"), &opts_reverse()),
+            Ordering::Greater
+        );
+    }
+
+    #[test]
+    fn test_reverse_equal_is_still_equal() {
+        assert_eq!(
+            compare(&net("10.0.0.0/8"), &net("10.0.0.0/8"), &opts_reverse()),
+            Ordering::Equal
+        );
+    }
+
+    #[test]
+    fn test_reverse_ipv4_before_ipv6_inverted() {
+        // Without reverse: IPv4 < IPv6
+        // With reverse: IPv6 < IPv4
+        assert_eq!(
+            compare(&net("10.0.0.0/8"), &net("2001:db8::/32"), &opts_reverse()),
+            Ordering::Greater
+        );
+    }
+
+    #[test]
+    fn test_reverse_with_ipv6_first() {
+        // ipv6_first puts IPv6 before IPv4, reverse inverts that back
+        let opts = SortOptions {
+            ipv6_first: true,
+            reverse: true,
+        };
+        assert_eq!(
+            compare(&net("2001:db8::/32"), &net("10.0.0.0/8"), &opts),
+            Ordering::Greater
+        );
+    }
+
+    #[test]
+    fn test_reverse_ipv6_network_address() {
+        assert_eq!(
+            compare(
+                &net("2001:db8::/32"),
+                &net("2001:db8:1::/48"),
+                &opts_reverse()
+            ),
+            Ordering::Greater
+        );
     }
 }
