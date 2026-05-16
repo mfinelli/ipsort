@@ -141,11 +141,22 @@ In this case the user wants all four IPs sorted and redistributed across the ori
 - All `Ip` spans across the **entire input** are collected into one pool and sorted globally
 - IPs are reinserted into their original span positions in document order
 - `NonIp` spans on each line are preserved exactly
-- Lines that become "empty" of IPs after reflow are **kept in place** — lines are never dropped, to avoid mangling surrounding document structure
 - Block separator logic does **not** apply in `--inline` mode (the whole input is one sort scope)
-- `--unique` deduplication (if enabled) applies across the entire reflowed pool
 
 **Rationale**: dropping lines silently could corrupt a YAML or config document in ways that are hard to detect. Preserving the line structure keeps the output safe to paste back into the source.
+
+### `--inline` with `--unique`
+
+When `--inline` and `--unique` are both set, deduplication is applied to the global IP pool before redistribution — duplicate IPs are removed from the sorted pool, then the deduplicated pool is redistributed into span positions. No error is returned since per-token dedup on a flat pool is always unambiguous.
+
+When the pool is smaller than the number of `Ip` span slots (because duplicates were removed), the excess `Ip` spans are replaced with empty `NonIp` spans. This means the line is kept in place but the slot that held the duplicate IP becomes empty. The line may render with trailing or internal whitespace from surrounding `NonIp` spans — this is a known limitation.
+
+Example: three lines each with one IP, where the third is a duplicate:
+```
+10.0.0.0/8          → 10.0.0.0/8
+192.168.0.0/16      → 192.168.0.0/16
+10.0.0.0/8          → (empty line — slot replaced with empty NonIp span)
+```
 
 ---
 
@@ -242,7 +253,7 @@ src/
   parse.rs      — token-level CIDR parsing (ParsedToken, parse_token, is_cidr_char)
   classify.rs   — line spanification and classification (Span, ClassifiedLine, classify_line)
   sort.rs       — sort comparator and options (SortOptions, compare)
-  blocks.rs     — block-level sorting (sort_blocks)
+  blocks.rs     — block-level sorting (sort_blocks, sort_inline, deduplicate_blocks, DeduplicateError)
   output.rs     — output reconstruction (OutputOptions, render_line)
 ```
 
@@ -291,6 +302,10 @@ Global sorting of a mixed document would move lines across non-IP boundaries, br
 ### Why preserve lines emptied by `--inline` reflow?
 
 Dropping lines silently could corrupt a YAML or config document in ways that are hard to detect. Preserving empty line structure keeps the output safe to paste back.
+
+### Why fold `--unique` into `sort_inline` rather than calling `deduplicate_blocks`?
+
+`deduplicate_blocks` operates on `ClassifiedLine` values after sorting and errors on multi-IP lines where dedup is ambiguous. In `--inline` mode there is no such ambiguity — IPs are a flat pool of tokens, not lines, so per-token dedup is always safe. Folding dedup into `sort_inline` keeps the pool-level logic together and avoids a category error: `deduplicate_blocks` is a line-level operation, `sort_inline` is a token-level operation.
 
 ### Why `--ips-only` instead of `--one-per-line`?
 
