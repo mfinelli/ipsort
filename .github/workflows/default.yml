@@ -32,6 +32,7 @@ jobs:
           cargo --version
           cargo fmt --version
           cargo clippy --version
+      - run: pnpm ci
       - run: pnpm run check
       - run: cargo fmt -- --check
       - run: cargo check --locked
