@@ -88,7 +88,7 @@ jobs:
         id: tar
         run: |
           if [ "$RUNNER_OS" == "macOS" ]; then
-            brew install gnu-tar
+            # brew install gnu-tar
             echo "cmd=gtar" >> $GITHUB_OUTPUT
           else
             echo "cmd=tar" >> $GITHUB_OUTPUT
@@ -99,7 +99,7 @@ jobs:
           gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
           passphrase: ${{ secrets.GPG_PASSPHRASE }}
       - run: cargo vendor --locked
-      - run: cargo doc --frozen --no-deps --release --document-private-items
+      - run: cargo doc --frozen --no-deps --release
       - run: make
       - run: |
           mkdir dist
