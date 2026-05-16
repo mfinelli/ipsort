@@ -38,3 +38,79 @@ jobs:
       - run: cargo clippy --locked
       - run: cargo test --locked
       - run: cargo build --locked --release --verbose
+
+  release:
+    runs-on: ${{ matrix.os }}-latest
+    timeout-minutes: 15
+    needs: [main]
+    permissions:
+      contents: write
+    strategy:
+      matrix:
+        os: [macos, ubuntu]
+    steps:
+      - name: Set OS name
+        id: os
+        run: >-
+          echo "name=$(echo $RUNNER_OS | tr '[:upper:]' '[:lower:]')" >>
+          $GITHUB_OUTPUT
+      - name: Set arch
+        id: arch
+        run: |
+          ARCH=$(uname -m)
+          case $ARCH in
+            x86_64)  echo "name=amd64" >> $GITHUB_OUTPUT ;;
+            aarch64) echo "name=arm64" >> $GITHUB_OUTPUT ;;
+            arm64)   echo "name=arm64" >> $GITHUB_OUTPUT ;;
+            *)       echo "name=$ARCH" >> $GITHUB_OUTPUT ;;
+          esac
+      - name: Set archive name
+        id: archive
+        run: |
+          NAME="ipsort"
+          NAME="${NAME}_${{ github.ref_name }}"
+          NAME="${NAME}_${{ steps.os.outputs.name }}"
+          NAME="${NAME}_${{ steps.arch.outputs.name }}"
+          NAME="${NAME}.tar.zst"
+          echo "name=${NAME}" >> $GITHUB_OUTPUT
+      - uses: actions/checkout@v6
+      - name: Install scdoc
+        run: |
+          if [ "$RUNNER_OS" == "Linux" ]; then
+            sudo apt-get install -y scdoc
+          elif [ "$RUNNER_OS" == "macOS" ]; then
+            brew install scdoc
+          fi
+      - uses: crazy-max/ghaction-import-gpg@v6
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
+          passphrase: ${{ secrets.GPG_PASSPHRASE }}
+      - run: cargo vendor --locked
+      - run: cargo doc --frozen --no-deps --release
+      - run: make
+      - run: |
+          mkdir dist
+          cp target/release/ipsort{,.1,.bash,.fish,.zsh} dist
+          cp Cargo.{lock,toml} README.md CHANGELOG.md LICENSE dist
+          rm -f target/doc/.lock
+          cp -r target/doc dist/
+          cp -r src dist/
+          cp -r vendor dist/
+      - run: |
+          cd dist
+          tar --owner=0 --group=0 --sort=name -acvf \
+            ../${{ steps.archive.outputs.name }} *
+      - run: gpg -ba ${{ steps.archive.outputs.name }}
+        if: startsWith(github.ref, 'refs/tags/')
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release_${{ matrix.os }}
+          path: "*.tar.zst"
+          retention-days: 1
+      - uses: ncipollo/release-action@v1
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          allowUpdates: true
+          artifacts: ipsort_*.tar.*
+          token: ${{ secrets.GITHUB_TOKEN }}
