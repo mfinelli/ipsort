@@ -13,6 +13,13 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v5
+        with:
+          version: latest
+      - uses: actions/setup-node@v6
+        with:
+          cache: pnpm
+          node-version: lts/*
       - uses: actions/cache@v5
         with:
           path: ~/.cargo/registry
@@ -22,6 +29,7 @@ jobs:
           cargo --version
           cargo fmt --version
           cargo clippy --version
+      - run: pnpm run check
       - run: cargo fmt -- --check
       - run: cargo check --locked
       - run: cargo clippy --locked

@@ -1,0 +1,11 @@
+{
+  "name": "ipsort",
+  "private": true,
+  "scripts": {
+    "check": "prettier --check .",
+    "write": "prettier --write ."
+  },
+  "devDependencies": {
+    "prettier": "^3.8.3"
+  }
+}
