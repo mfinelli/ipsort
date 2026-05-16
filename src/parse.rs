@@ -92,7 +92,7 @@ impl ParsedToken {
 /// address.
 ///
 /// Leading and trailing non-CIDR punctuation is stripped before parsing (see
-/// [`strip_cidr_punctuation`]). The original unstripped token is preserved in
+/// `strip_cidr_punctuation`). The original unstripped token is preserved in
 /// the returned value for output purposes.
 ///
 /// Parsing is attempted in this order:
@@ -163,7 +163,8 @@ pub fn parse_token(token: &str) -> ParsedToken {
 /// - `/`: CIDR prefix length separator
 ///
 /// This is the single source of truth for what constitutes a CIDR character,
-/// used by both [`strip_cidr_punctuation`] and [`crate::classify::split_tokens`].
+/// used by both [`strip_cidr_punctuation`] and the line spanification logic
+/// in [`crate::classify`].
 pub(crate) fn is_cidr_char(c: char) -> bool {
     c.is_ascii_hexdigit() || matches!(c, '.' | ':' | '/')
 }
