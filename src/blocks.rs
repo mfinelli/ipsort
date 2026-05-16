@@ -43,10 +43,19 @@
 //! The two IP groups are sorted independently, with the comment and blank line
 //! staying in place between them.
 //!
+//! # Sorting strategies
+//! Two top-level sorting functions are available:
+//!
+//! - [`sort_blocks`]: sorts `HasIp` lines within each block independently.
+//!   `NoIp` lines act as block separators and are preserved in place.
+//! - [`sort_inline`]: collects all `Ip` spans from the entire input into one
+//!   pool, sorts globally, then redistributes sorted IPs back into their
+//!   original span positions. Block separator logic does not apply.
+//!
 //! # Error handling
-//! `sort_blocks` is a pure transformation and does not check whether any IP
-//! addresses were found. The caller is responsible for erroring if the input
-//! contained no IP addresses at all.
+//! Both sorting functions are pure transformations and do not check whether
+//! any IP addresses were found. The caller is responsible for erroring if the
+//! input contained no IP addresses at all.
 //!
 //! `deduplicate_blocks` returns a [`DeduplicateError`] if a duplicate is found
 //! on a multi-IP line in non-ips-only mode, since the correct action is
@@ -193,7 +202,7 @@ pub fn deduplicate_blocks(
                     .collect();
 
                 if ips.is_empty() {
-                    // All IPs were intra-line dupes (drop the line entirely)
+                    // All IPs were intra-line dupes: drop the line entirely
                     continue;
                 }
 
@@ -269,7 +278,7 @@ pub fn deduplicate_blocks(
                                     });
                                 }
                             }
-                            // No dupes (add all and keep line)
+                            // No dupes: add all and keep line
                             for net in &ips {
                                 seen.insert(*net);
                             }
@@ -299,11 +308,124 @@ pub fn deduplicate_blocks(
     Ok(output)
 }
 
+/// Sort all IP addresses across the entire input as a single global pool,
+/// redistributing sorted IPs back into their original span positions.
+///
+/// Unlike [`sort_blocks`], this function ignores block separator logic (all
+/// `Ip` spans from all lines are collected, sorted, then reinserted in order).
+/// `NoIp` lines and `NonIp` spans are preserved exactly in place.
+///
+/// Lines that have all their IPs redistributed away (which cannot happen in
+/// normal redistribution, since the pool size equals the number of `Ip` spans)
+/// are kept in place as empty lines. This maintains document structure.
+///
+/// If `unique` is `true`, duplicate IPs are removed from the global pool
+/// before redistribution. No error is returned (per-token dedup is always
+/// unambiguous in a flat pool).
+///
+/// The `sort_key` on each output `HasIp` line is recalculated from its
+/// redistributed spans to keep the invariant clean.
+pub fn sort_inline(
+    lines: Vec<ClassifiedLine>,
+    opts: &SortOptions,
+    unique: bool,
+) -> Vec<ClassifiedLine> {
+    // Step 1: collect all IP networks from all HasIp lines in document order
+    let mut pool: Vec<IpNet> = lines
+        .iter()
+        .flat_map(|line| match line {
+            ClassifiedLine::HasIp { spans, .. } => spans
+                .iter()
+                .filter_map(|s| match s {
+                    Span::Ip(t) => t.network().copied(),
+                    Span::NonIp(_) => None,
+                })
+                .collect::<Vec<_>>(),
+            ClassifiedLine::NoIp(_) => vec![],
+        })
+        .collect();
+
+    // Step 2: sort the pool
+    pool.sort_by(|a, b| compare(a, b, opts));
+
+    // Step 3: optionally deduplicate the pool
+    if unique {
+        pool.dedup_by(|a, b| a == b);
+    }
+
+    // Step 4: redistribute sorted IPs back into span positions
+    let mut pool_iter = pool.into_iter();
+
+    lines
+        .into_iter()
+        .map(|line| match line {
+            ClassifiedLine::NoIp(_) => line,
+            ClassifiedLine::HasIp {
+                spans, warnings, ..
+            } => {
+                let new_spans: Vec<Span> = spans
+                    .into_iter()
+                    .map(|span| match span {
+                        Span::NonIp(_) => span,
+                        Span::Ip(token) => {
+                            if let Some(net) = pool_iter.next() {
+                                // Substitute the next sorted IP, preserving
+                                // the original token's string if the network
+                                // matches (i.e. no reordering happened for this
+                                // slot), otherwise use the canonical form.
+                                if token.network().copied() == Some(net) {
+                                    Span::Ip(token)
+                                } else {
+                                    // Build a synthetic token string from the
+                                    // network (the original token belongs to a
+                                    // different position now).
+                                    use crate::parse::ParsedToken;
+                                    Span::Ip(ParsedToken::ValidCidr {
+                                        original: net.to_string(),
+                                        network: net,
+                                        had_host_bits: false,
+                                    })
+                                }
+                            } else {
+                                // Pool exhausted (only possible after --unique
+                                // dedup). Convert to an empty NonIp span so the
+                                // slot disappears from output while preserving
+                                // surrounding decoration structure.
+                                Span::NonIp(String::new())
+                            }
+                        }
+                    })
+                    .collect();
+
+                // Recalculate sort_key from redistributed spans
+                let sort_key = new_spans
+                    .iter()
+                    .filter_map(|s| match s {
+                        Span::Ip(t) => t.network().copied(),
+                        Span::NonIp(_) => None,
+                    })
+                    .min_by(|a, b| compare(a, b, opts))
+                    .unwrap_or_else(|| {
+                        // All IPs were consumed by dedup - use a sentinel.
+                        // This line will render with no IP spans.
+                        "0.0.0.0/0".parse().unwrap()
+                    });
+
+                ClassifiedLine::HasIp {
+                    spans: new_spans,
+                    sort_key,
+                    warnings,
+                }
+            }
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::classify::classify_line;
-    use crate::output::IpsOnlyMode;
+    use crate::output::{IpsOnlyMode, OutputOptions, render_line};
     use crate::sort::SortOptions;
     use ipnet::IpNet;
     use std::str::FromStr;
@@ -342,6 +464,15 @@ mod tests {
         IpNet::from_str(s).unwrap()
     }
 
+    fn ip_count(line: &ClassifiedLine) -> usize {
+        match line {
+            ClassifiedLine::HasIp { spans, .. } => {
+                spans.iter().filter(|s| matches!(s, Span::Ip(_))).count()
+            }
+            ClassifiedLine::NoIp(_) => 0,
+        }
+    }
+
     fn dedup(
         lines: Vec<ClassifiedLine>,
     ) -> Result<Vec<ClassifiedLine>, DeduplicateError> {
@@ -360,13 +491,8 @@ mod tests {
         deduplicate_blocks(lines, &IpsOnlyMode::Off)
     }
 
-    fn ip_count(line: &ClassifiedLine) -> usize {
-        match line {
-            ClassifiedLine::HasIp { spans, .. } => {
-                spans.iter().filter(|s| matches!(s, Span::Ip(_))).count()
-            }
-            ClassifiedLine::NoIp(_) => 0,
-        }
+    fn render(line: &ClassifiedLine) -> String {
+        render_line(line, &OutputOptions::default(), &opts()).join("\n")
     }
 
     #[test]
@@ -751,11 +877,136 @@ mod tests {
 
     #[test]
     fn test_intra_line_all_dupes_line_dropped() {
-        // All IPs are the same: after intra dedup only one remains,
+        // All IPs are the same - after intra dedup only one remains,
         // then inter dedup sees it's new, so line is kept with one IP
         let lines = vec![classify("10.0.0.0/8 10.0.0.0/8")];
         let result = dedup_off(lines).unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(ip_count(&result[0]), 1);
+    }
+
+    #[test]
+    fn test_inline_single_block_same_as_sort_blocks() {
+        let lines = vec![
+            classify("192.168.0.0/16"),
+            classify("10.0.0.0/8"),
+            classify("172.16.0.0/12"),
+        ];
+        let result = sort_inline(lines, &opts(), false);
+        assert_eq!(sort_key(&result[0]), net("10.0.0.0/8"));
+        assert_eq!(sort_key(&result[1]), net("172.16.0.0/12"));
+        assert_eq!(sort_key(&result[2]), net("192.168.0.0/16"));
+    }
+
+    #[test]
+    fn test_inline_crosses_block_separator() {
+        // With sort_blocks these would sort independently per block.
+        // With sort_inline all four IPs sort together globally.
+        let lines = vec![
+            classify("192.168.0.0/16"),
+            classify(""), // separator (ignored by inline)
+            classify("10.0.0.0/8"),
+        ];
+        let result = sort_inline(lines, &opts(), false);
+        // Lowest IP should be in first HasIp position (index 0)
+        assert_eq!(sort_key(&result[0]), net("10.0.0.0/8"));
+        // Separator preserved in place
+        assert!(matches!(&result[1], ClassifiedLine::NoIp(_)));
+        assert_eq!(sort_key(&result[2]), net("192.168.0.0/16"));
+    }
+
+    #[test]
+    fn test_inline_multi_ip_lines_redistributed() {
+        // Input: two lines each with two IPs in reverse order
+        // Inline sort should redistribute all four IPs globally
+        let lines = vec![
+            classify("192.168.0.0/16 172.16.0.0/12"),
+            classify("10.0.0.1 10.0.0.0/8"),
+        ];
+        let result = sort_inline(lines, &opts(), false);
+        // All four IPs sorted: 10.0.0.0/8, 10.0.0.1/32, 172.16.0.0/12,
+        // 192.168.0.0/16
+        // Line 1 gets the two lowest, line 2 gets the two highest
+        assert_eq!(sort_key(&result[0]), net("10.0.0.0/8"));
+        assert_eq!(sort_key(&result[1]), net("172.16.0.0/12"));
+    }
+
+    #[test]
+    fn test_inline_no_ip_lines_preserved() {
+        let lines = vec![
+            classify("# comment"),
+            classify("192.168.0.0/16"),
+            classify("10.0.0.0/8"),
+        ];
+        let result = sort_inline(lines, &opts(), false);
+        assert!(matches!(&result[0], ClassifiedLine::NoIp(_)));
+        assert_eq!(sort_key(&result[1]), net("10.0.0.0/8"));
+        assert_eq!(sort_key(&result[2]), net("192.168.0.0/16"));
+    }
+
+    #[test]
+    fn test_inline_decoration_preserved() {
+        let lines =
+            vec![classify("- 192.168.0.0/16"), classify("- 10.0.0.0/8")];
+        let result = sort_inline(lines, &opts(), false);
+        assert_eq!(render(&result[0]), "- 10.0.0.0/8");
+        assert_eq!(render(&result[1]), "- 192.168.0.0/16");
+    }
+
+    #[test]
+    fn test_inline_sort_key_recalculated() {
+        let lines = vec![
+            classify("192.168.0.0/16 172.16.0.0/12"),
+            classify("10.0.0.0/8 10.0.1.0/24"),
+        ];
+        let result = sort_inline(lines, &opts(), false);
+        // sort_key should reflect the redistributed IPs, not the originals
+        assert_eq!(sort_key(&result[0]), net("10.0.0.0/8"));
+        assert_eq!(sort_key(&result[1]), net("172.16.0.0/12"));
+    }
+
+    #[test]
+    fn test_inline_unique_removes_duplicates_from_pool() {
+        let lines = vec![
+            classify("10.0.0.0/8"),
+            classify("192.168.0.0/16"),
+            classify("10.0.0.0/8"),
+        ];
+        let result = sort_inline(lines, &opts(), true);
+        // Pool after dedup: [10.0.0.0/8, 192.168.0.0/16]
+        // Two unique IPs redistributed into three slots (third line gets no
+        // IP)
+        assert_eq!(result.len(), 3);
+        assert_eq!(sort_key(&result[0]), net("10.0.0.0/8"));
+        assert_eq!(sort_key(&result[1]), net("192.168.0.0/16"));
+    }
+
+    #[test]
+    fn test_inline_unique_no_duplicates_unchanged() {
+        let lines = vec![classify("192.168.0.0/16"), classify("10.0.0.0/8")];
+        let result = sort_inline(lines, &opts(), true);
+        assert_eq!(result.len(), 2);
+        assert_eq!(sort_key(&result[0]), net("10.0.0.0/8"));
+        assert_eq!(sort_key(&result[1]), net("192.168.0.0/16"));
+    }
+
+    #[test]
+    fn test_inline_mixed_ipv4_ipv6() {
+        let lines = vec![classify("2001:db8::/32"), classify("10.0.0.0/8")];
+        let result = sort_inline(lines, &opts(), false);
+        assert_eq!(sort_key(&result[0]), net("10.0.0.0/8"));
+        assert_eq!(sort_key(&result[1]), net("2001:db8::/32"));
+    }
+
+    #[test]
+    fn test_inline_reverse() {
+        let opts = SortOptions {
+            reverse: true,
+            ..Default::default()
+        };
+        let lines = vec![classify("10.0.0.0/8"), classify("192.168.0.0/16")];
+        let result = sort_inline(lines, &opts, false);
+        assert_eq!(sort_key(&result[0]), net("192.168.0.0/16"));
+        assert_eq!(sort_key(&result[1]), net("10.0.0.0/8"));
     }
 }

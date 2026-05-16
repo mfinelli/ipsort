@@ -17,7 +17,7 @@
 
 use clap::{CommandFactory, Parser};
 use clap_complete::{Shell, generate};
-use ipsort::blocks::{deduplicate_blocks, sort_blocks};
+use ipsort::blocks::{deduplicate_blocks, sort_blocks, sort_inline};
 use ipsort::classify::{ClassifiedLine, classify_line};
 use ipsort::output::{IpsOnlyMode, OutputOptions, render_line};
 use ipsort::sort::SortOptions;
@@ -102,12 +102,6 @@ fn main() {
         lines
     };
 
-    // Warn about unimplemented flags
-    if cli.inline {
-        eprintln!("ipsort: --inline is not yet implemented");
-        std::process::exit(1);
-    }
-
     let sort_opts = SortOptions {
         ipv6_first: cli.ipv6_first,
         reverse: cli.reverse,
@@ -139,26 +133,30 @@ fn main() {
         std::process::exit(1);
     }
 
-    // Sort blocks
-    let sorted = sort_blocks(classified, &sort_opts);
-
-    // Deduplicate if requested
-    let sorted = if cli.unique {
-        match deduplicate_blocks(sorted, &out_opts.ips_only) {
-            Ok(lines) => lines,
-            Err(e) => {
-                eprintln!(
-                    "ipsort: --unique: duplicate IP {} found on multi-IP line {:?}",
-                    e.duplicate_ip, e.line
-                );
-                eprintln!(
-                    "ipsort: --unique: cannot determine which IP to remove; clean up input and try again"
-                );
-                std::process::exit(1);
-            }
-        }
+    // Sort and deduplicate
+    let sorted = if cli.inline {
+        // --inline: sort all IPs globally across the entire input,
+        // dedup is folded into sort_inline when --unique is set
+        sort_inline(classified, &sort_opts, cli.unique)
     } else {
-        sorted
+        let sorted = sort_blocks(classified, &sort_opts);
+        if cli.unique {
+            match deduplicate_blocks(sorted, &out_opts.ips_only) {
+                Ok(lines) => lines,
+                Err(e) => {
+                    eprintln!(
+                        "ipsort: --unique: duplicate IP {} found on multi-IP line {:?}",
+                        e.duplicate_ip, e.line
+                    );
+                    eprintln!(
+                        "ipsort: --unique: cannot determine which IP to remove; clean up input and try again"
+                    );
+                    std::process::exit(1);
+                }
+            }
+        } else {
+            sorted
+        }
     };
 
     // Render and print
