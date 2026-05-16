@@ -21,7 +21,6 @@
 //! together define the canonical ordering used throughout `ipsort`.
 //!
 //! # Ordering rules
-//!
 //! Two [`IpNet`] values are ordered as follows:
 //!
 //! 1. **IP family**: IPv4 and IPv6 are sorted as separate groups. By default

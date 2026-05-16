@@ -23,7 +23,6 @@
 //! reassembling the result.
 //!
 //! # Block model
-//!
 //! A block is a contiguous run of [`ClassifiedLine::HasIp`] lines. Blocks are
 //! delimited by [`ClassifiedLine::NoIp`] lines (empty lines, comments, or any
 //! line with no recognizable IP address), which act as anchors and are
@@ -45,7 +44,6 @@
 //! staying in place between them.
 //!
 //! # Error handling
-//!
 //! `sort_blocks` is a pure transformation and does not check whether any IP
 //! addresses were found. The caller is responsible for erroring if the input
 //! contained no IP addresses at all.
@@ -137,10 +135,16 @@ mod tests {
         }
     }
 
-    fn original(line: &ClassifiedLine) -> &str {
+    fn original(line: &ClassifiedLine) -> String {
         match line {
-            ClassifiedLine::HasIp { original, .. } => original,
-            ClassifiedLine::NoIp(s) => s,
+            ClassifiedLine::HasIp { spans, .. } => spans
+                .iter()
+                .map(|s| match s {
+                    crate::classify::Span::Ip(t) => t.original(),
+                    crate::classify::Span::NonIp(s) => s.as_str(),
+                })
+                .collect(),
+            ClassifiedLine::NoIp(s) => s.clone(),
         }
     }
 
