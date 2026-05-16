@@ -9,7 +9,8 @@ endif
 VERSION ?= $(shell $(GREP) -m1 '^version ' Cargo.toml | awk -F\" '{print $$2}')
 TODAY ?= $(shell date +%Y-%m-%d)
 
-all: ipsort
+all: target/release/ipsort target/release/ipsort.1 target/release/ipsort.bash \
+	target/release/ipsort.fish target/release/ipsort.zsh
 
 clean:
 	rm -rf target
@@ -30,9 +31,7 @@ target/release/ipsort.1: ipsort.1.scd
 	sed -e "s/__VERSION__/$(VERSION)/" -e "s/__DATE__/$(TODAY)/" \
 		$< | scdoc > $@
 
-install: target/release/ipsort target/release/ipsort.1 \
-	target/release/ipsort.bash target/release/ipsort.fish \
-	target/release/ipsort.zsh
+install: all
 	install -Dm0755 target/release/ipsort "$(DESTDIR)$(PREFIX)/bin/ipsort"
 	install -Dm0644 README.md \
 		"$(DESTDIR)$(PREFIX)/share/doc/ipsort/README.md"
