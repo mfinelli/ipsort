@@ -15,8 +15,10 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+use classify::{ClassifiedLine, classify_line};
 use ipnet::IpNet;
-use ipsort::{parse, sort};
+use ipsort::{classify, parse, sort};
+use sort::SortOptions;
 use std::str::FromStr;
 
 fn main() {
@@ -78,5 +80,44 @@ fn main() {
 
     for net in &networks {
         println!("{net}");
+    }
+
+    let lines = vec![
+        "# my network ranges",
+        "192.168.1.0/24",
+        "10.0.0.0/8",
+        "172.16.0.0/12",
+        "",
+        "# guest network",
+        "- 192.168.2.0/24",
+        "- 10.10.0.0/16",
+        "network: 172.16.5.0/24 172.16.1.0/24",
+        "\"10.0.1.0/24\", \"10.0.2.0/24\"",
+        "10.0.0.5/24", // host bits set (should warn)
+    ];
+
+    let opts = SortOptions::default();
+
+    for line in lines {
+        let classified = classify_line(line, &opts);
+        match &classified {
+            ClassifiedLine::HasIp {
+                original,
+                sort_key,
+                tokens,
+                warnings,
+            } => {
+                for w in warnings {
+                    eprintln!("{w}");
+                }
+                println!(
+                    "HasIp     sort_key={sort_key}  original={original:?}  tokens={}",
+                    tokens.len()
+                );
+            }
+            ClassifiedLine::NoIp(s) => {
+                println!("NoIp      {s:?}");
+            }
+        }
     }
 }

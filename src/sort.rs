@@ -59,7 +59,7 @@ impl Default for SortOptions {
 /// See the [module-level documentation](self) for the full ordering rules.
 ///
 /// # Examples
-/// ```
+/// ```rust
 /// use ipnet::IpNet;
 /// use std::cmp::Ordering;
 /// use std::str::FromStr;

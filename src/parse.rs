@@ -154,18 +154,29 @@ pub fn parse_token(token: &str) -> ParsedToken {
     ParsedToken::NotAnIp(token.to_string())
 }
 
-/// Strip leading and trailing characters that cannot appear in a valid CIDR
-/// or IP address.
+/// Returns `true` if a character can appear inside a valid CIDR or IP address.
 ///
-/// Valid CIDR characters are: `0-9`, `a-f`, `A-F`, `.`, `:`, `/`.
-/// Everything else (quotes, brackets, commas, semicolons, etc.) is stripped
-/// from both ends of the token before parsing is attempted.
+/// The valid set is `[0-9a-fA-F.:/]`:
+/// - `0-9`, `a-f`, `A-F`: decimal octets and hexadecimal IPv6 groups
+/// - `.`: IPv4 octet separator
+/// - `:`: IPv6 group separator
+/// - `/`: CIDR prefix length separator
+///
+/// This is the single source of truth for what constitutes a CIDR character,
+/// used by both [`strip_cidr_punctuation`] and [`crate::classify::split_tokens`].
+pub(crate) fn is_cidr_char(c: char) -> bool {
+    c.is_ascii_hexdigit() || matches!(c, '.' | ':' | '/')
+}
+
+/// Strip leading and trailing characters that are not valid CIDR characters
+/// (as defined by [`is_cidr_char`]) from both ends of a token.
+///
+/// This handles common punctuation wrapping such as `"10.0.0.0/8",`,
+/// `[10.0.0.0/8]`, or `10.0.0.0/8;` without requiring a regex.
 ///
 /// Only the ends are stripped; characters in the middle are left alone so
 /// that malformed tokens like `10.0.0.1/24abc` are not silently accepted.
 fn strip_cidr_punctuation(s: &str) -> &str {
-    let is_cidr_char =
-        |c: char| c.is_ascii_hexdigit() || matches!(c, '.' | ':' | '/');
     s.trim_matches(|c: char| !is_cidr_char(c))
 }
 
