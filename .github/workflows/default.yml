@@ -26,7 +26,7 @@ jobs:
       - uses: actions/cache@v5
         with:
           path: ~/.cargo/registry
-          key: cargo-linux-${{ hashFiles('**/Cargo.lock') }}
+          key: cargo-${{ matrix.os }}-${{ hashFiles('**/Cargo.lock') }}
       - run: |
           rustc --version
           cargo --version
