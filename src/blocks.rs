@@ -495,10 +495,10 @@ fn aggregate_flush(
     for (i, line) in buffer.iter().enumerate() {
         if let ClassifiedLine::HasIp { spans, .. } = line {
             for span in spans {
-                if let Span::Ip(t) = span {
-                    if let Some(net) = t.network() {
-                        ip_to_line.push((*net, i));
-                    }
+                if let Span::Ip(t) = span
+                    && let Some(net) = t.network()
+                {
+                    ip_to_line.push((*net, i));
                 }
             }
         }
@@ -616,15 +616,13 @@ fn aggregate_flush(
                     let new_spans: Vec<Span> = spans
                         .into_iter()
                         .map(|span| {
-                            if !substituted {
-                                if let Span::Ip(_) = &span {
-                                    substituted = true;
-                                    return Span::Ip(ParsedToken::ValidCidr {
-                                        original: agg_net.to_string(),
-                                        network: agg_net,
-                                        had_host_bits: false,
-                                    });
-                                }
+                            if !substituted && let Span::Ip(_) = &span {
+                                substituted = true;
+                                return Span::Ip(ParsedToken::ValidCidr {
+                                    original: agg_net.to_string(),
+                                    network: agg_net,
+                                    had_host_bits: false,
+                                });
                             }
                             span
                         })
