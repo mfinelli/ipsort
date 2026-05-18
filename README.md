@@ -140,6 +140,75 @@ EOF
 $ jq '.networks[]' config.json | ipsort
 ```
 
+**Read from a file using shell redirection:**
+
+```sh
+$ ipsort < addresses.txt
+```
+
+**Sort a file in place using `sponge` from `moreutils`:**
+
+```sh
+$ ipsort < addresses.txt | sponge addresses.txt
+```
+
+Without `sponge`, redirecting to the same file you are reading from will
+truncate it before `ipsort` reads it. `sponge` buffers the output and writes it
+only after the input is fully read.
+
+**Sort an entire YAML file, leaving all structure intact:**
+
+```sh
+$ cat firewall.yml
+# firewall rules
+allowed_sources:
+  - 192.168.1.0/24
+  - 10.0.0.0/8
+  - 172.16.5.0/24
+
+denied_sources:
+  - 10.99.0.0/16
+  - 192.168.99.0/24
+
+$ ipsort < firewall.yml
+# firewall rules
+allowed_sources:
+  - 10.0.0.0/8
+  - 172.16.5.0/24
+  - 192.168.1.0/24
+
+denied_sources:
+  - 10.99.0.0/16
+  - 192.168.99.0/24
+```
+
+Comments, blank lines, and YAML keys are all preserved exactly. Only the IP
+addresses are reordered, independently within each block separated by blank
+lines.
+
+**Sort IPs in a Kubernetes ingress annotation with `--inline`:**
+
+```sh
+$ ipsort --inline < ingress.yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: my-service
+  annotations:
+    nginx.ingress.kubernetes.io/whitelist-source-range: >-
+      10.0.0.0/8,
+      10.99.0.0/16,
+      172.16.5.0/24,
+      192.168.1.0/24
+spec:
+  rules:
+  - host: my-service.example.com
+```
+
+The entire YAML structure is preserved. `--inline` treats all IPs across the
+file as one pool, which is what you want when a list spans multiple lines within
+a single annotation value.
+
 **Sort a multi-line YAML value with `--inline`:**
 
 ```sh

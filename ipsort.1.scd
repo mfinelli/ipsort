@@ -30,6 +30,10 @@ Lines containing no recognizable IP address act as block separators: each
 group of IP lines between separators is sorted independently, with separators
 preserved in place.
 
+Because non-IP content is always preserved verbatim, *ipsort* can be given an
+entire YAML, TOML, or config file as input; only the IP addresses will be
+reordered, leaving comments, keys, blank lines, and all other content untouched.
+
 # OPTIONS
 
 *-r*, *--reverse*
@@ -272,6 +276,61 @@ EOF
 - 192.168.0.0/24
 ```
 
+Read from a file using shell redirection:
+
+```
+$ ipsort < addresses.txt
+```
+
+Sort a file in place using *sponge*(1) from *moreutils*:
+
+```
+$ ipsort < addresses.txt | sponge addresses.txt
+```
+
+Without *sponge*, redirecting output to the same file being read will truncate
+it before *ipsort* reads it. *sponge* buffers the full output before writing.
+
+Sort an entire YAML file, leaving all structure intact:
+
+```
+$ ipsort < firewall.yml
+# firewall rules
+allowed_sources:
+  - 10.0.0.0/8
+  - 172.16.5.0/24
+  - 192.168.1.0/24
+
+denied_sources:
+  - 10.99.0.0/16
+  - 192.168.99.0/24
+```
+
+Comments, blank lines, and YAML keys are preserved exactly. IPs are sorted
+independently within each block separated by blank lines.
+
+Sort IPs in a Kubernetes ingress annotation with *--inline*:
+
+```
+$ ipsort --inline < ingress.yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: my-service
+  annotations:
+    nginx.ingress.kubernetes.io/whitelist-source-range: >-
+      10.0.0.0/8,
+      10.99.0.0/16,
+      172.16.5.0/24,
+      192.168.1.0/24
+spec:
+  rules:
+  - host: my-service.example.com
+```
+
+The entire YAML structure is preserved. *--inline* treats all IPs across the
+file as one pool, sorting them globally while leaving everything else in place.
+
 # NOTES
 
 When an IP is removed from a multi-IP line by *--unique* in *--ips-only* or
@@ -281,4 +340,4 @@ in this case should use *--ips-only* to strip all decoration.
 
 # SEE ALSO
 
-*sort*(1), *jq*(1), *uniq*(1)
+*sort*(1), *jq*(1), *uniq*(1), *sponge*(1)
