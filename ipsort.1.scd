@@ -143,12 +143,14 @@ downstream.
 	Success.
 
 *1*
-	An error occurred: no input provided, no IP addresses found, invalid flag
-	combination, or *--unique* encountered an ambiguous duplicate on a
-	multi-IP line.
+	*--check* ran successfully and determined the input is not in the expected
+	state.
 
 *2*
-	Invalid arguments (usage error, reported by the argument parser).
+	Operational error: no input provided, no IP addresses found, *--unique*
+	encountered an ambiguous duplicate on a multi-IP line, *--aggregate*
+	encountered a multi-IP line involved in a cross-line aggregation, or
+	invalid arguments (reported by the argument parser).
 
 # EXAMPLES
 

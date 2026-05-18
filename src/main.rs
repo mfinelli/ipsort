@@ -109,7 +109,7 @@ fn main() {
             .collect();
         if !is_tty && lines.is_empty() {
             eprintln!("ipsort: no input provided");
-            std::process::exit(1);
+            std::process::exit(2);
         }
         lines
     };
@@ -142,7 +142,7 @@ fn main() {
         .any(|l| matches!(l, ClassifiedLine::HasIp { .. }));
     if !has_any_ip {
         eprintln!("ipsort: no IP addresses found in input");
-        std::process::exit(1);
+        std::process::exit(2);
     }
 
     // Save a clone of classified lines for --check comparison before sorting
@@ -169,7 +169,7 @@ fn main() {
                     eprintln!(
                         "ipsort: --aggregate: cannot determine which IP to replace; clean up input and try again"
                     );
-                    std::process::exit(1);
+                    std::process::exit(2);
                 }
             }
         } else {
@@ -187,7 +187,7 @@ fn main() {
                     eprintln!(
                         "ipsort: --unique: cannot determine which IP to remove; clean up input and try again"
                     );
-                    std::process::exit(1);
+                    std::process::exit(2);
                 }
             }
         } else {

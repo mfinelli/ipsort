@@ -292,7 +292,7 @@ fn test_unique_multi_ip_line_errors() {
         .args(["--unique"])
         .write_stdin("10.0.0.0/8\n192.168.0.0/16 10.0.0.0/8\n")
         .assert()
-        .failure()
+        .code(2)
         .stderr(predicate::str::contains("10.0.0.0/8"))
         .stderr(predicate::str::contains("--unique"));
 }
@@ -436,17 +436,17 @@ fn test_host_bits_original_preserved_in_output() {
 }
 
 #[test]
-fn test_no_ips_found_exits_nonzero() {
+fn test_no_ips_found_exits_two() {
     ipsort()
         .write_stdin("# just a comment\n---\n")
         .assert()
-        .failure()
+        .code(2)
         .stderr(predicate::str::contains("no IP addresses found"));
 }
 
 #[test]
-fn test_empty_pipe_exits_nonzero() {
-    ipsort().write_stdin("").assert().failure();
+fn test_empty_pipe_exits_two() {
+    ipsort().write_stdin("").assert().code(2);
 }
 
 #[test]
@@ -557,7 +557,7 @@ fn test_aggregate_multi_ip_line_error() {
         .args(["--aggregate"])
         .write_stdin("10.0.0.0/25 192.168.0.0/24\n10.0.0.128/25\n")
         .assert()
-        .failure()
+        .code(2)
         .stderr(predicate::str::contains("--aggregate"))
         .stderr(predicate::str::contains("10.0.0.0/24"));
 }
@@ -595,12 +595,12 @@ fn test_check_already_sorted_exits_zero() {
 }
 
 #[test]
-fn test_check_unsorted_exits_nonzero() {
+fn test_check_unsorted_exits_one() {
     ipsort()
         .args(["--check"])
         .write_stdin("192.168.0.0/16\n10.0.0.0/8\n")
         .assert()
-        .failure();
+        .code(1);
 }
 
 #[test]

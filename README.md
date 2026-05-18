@@ -81,6 +81,14 @@ stdin.
 
 `--ips-only` and `--ips-only-with-structure` are mutually exclusive.
 
+### Exit codes
+
+| Code | Meaning                                                            |
+| ---- | ------------------------------------------------------------------ |
+| `0`  | Success                                                            |
+| `1`  | `--check` ran successfully; input is not in the expected state     |
+| `2`  | Operational error (no input, no IPs found, conflicting flag usage) |
+
 ## Examples
 
 **Sort a list from stdin:**

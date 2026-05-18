@@ -341,6 +341,20 @@ already produces a minimal non-overlapping set.
 IPs across the entire input are aggregated as one global pool rather than per
 block.
 
+### Exit codes
+
+- **0** — success; input was sorted/processed normally, or `--check` confirmed
+  input is already in the expected state
+- **1** — `--check` ran successfully and determined the input is not in the
+  expected state
+- **2** — operational error: no input provided, no IPs found, `--unique`
+  multi-IP conflict, `--aggregate` multi-IP conflict
+- **2** — invalid arguments (reported by the argument parser)
+
+The distinction between exit codes 1 and 2 allows callers to tell apart "check
+ran and found unsorted input" from "something went wrong running ipsort at all."
+This follows the convention of `sort --check` and `grep`.
+
 ### Check mode: `--check` / `-c`
 
 Checks whether the input is already in the state the current flags would
