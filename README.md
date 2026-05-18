@@ -237,6 +237,18 @@ $ printf '10.0.0.0/8\n192.168.0.0/16\n10.0.0.0/8\n' | ipsort --unique
 192.168.0.0/16
 ```
 
+**Aggregate subnets into their minimal supernet:**
+
+```sh
+$ cat <<EOF | ipsort --aggregate
+- 10.0.0.0/25
+- 10.0.0.128/25
+- 192.168.0.0/24
+EOF
+- 10.0.0.0/24
+- 192.168.0.0/24
+```
+
 **Normalize to canonical form:**
 
 ```sh
