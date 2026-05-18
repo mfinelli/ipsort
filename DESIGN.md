@@ -311,6 +311,36 @@ redistribution. Deduplication operates on this pool before IPs are reinserted
 into span positions. Lines that become empty after dedup are kept in place
 (consistent with `--inline` behavior).
 
+### Aggregation: `--aggregate` / `-a`
+
+Merge adjacent CIDR blocks into their minimal supernet representation using
+`ipnet::aggregate`. Applied per block (or globally when `--inline` is set).
+
+**Algorithm**:
+
+1. Collect all IP networks from the block
+2. Pass to `ipnet::aggregate` to compute the minimal covering set
+3. For each aggregated CIDR, find the first input line whose IP is a subnet of
+   it — that line wins
+4. Substitute the aggregated CIDR into the winning line's `Ip` span, preserving
+   all `NonIp` spans
+5. Drop all other lines whose IPs were consumed by the same aggregated CIDR
+6. Lines not involved in any aggregation pass through unchanged with their
+   original token string
+
+**Error behavior**: if a cross-line aggregation involves a multi-IP line,
+`ipsort` exits with an error — the ambiguity of which IP to replace requires the
+user to clean up input. Multi-IP lines not involved in cross-line aggregation
+pass through unchanged.
+
+**Relationship to `--unique`**: `--aggregate` subsumes `--unique`. When
+`--aggregate` is set, `--unique` has no additional effect since aggregation
+already produces a minimal non-overlapping set.
+
+**`--aggregate` with `--inline`**: aggregation scope follows `--inline` — all
+IPs across the entire input are aggregated as one global pool rather than per
+block.
+
 ---
 
 ## Flags Summary
@@ -319,6 +349,7 @@ into span positions. Lines that become empty after dedup are kept in place
 | --------------------------- | ---------------------------------------------------------------------------------------------- |
 | `--inline` / `-i`           | Reorder all IP tokens freely across the entire input rather than sorting per block             |
 | `--unique` / `-u`           | Deduplicate by normalized CIDR, keeping first occurrence                                       |
+| `--aggregate` / `-a`        | Merge adjacent CIDRs into their minimal supernet representation                                |
 | `--ips-only`                | Discard all non-IP content and non-IP lines; emit one bare address per line                    |
 | `--ips-only-with-structure` | Strip decoration but preserve non-IP lines as block separators; emit one bare address per line |
 | `--normalize` / `-r`        | Emit canonical network strings (clears host bits, adds `/32`/`/128` to bare IPs)               |
@@ -340,7 +371,7 @@ src/
   parse.rs      — token-level CIDR parsing (ParsedToken, parse_token, is_cidr_char)
   classify.rs   — line spanification and classification (Span, ClassifiedLine, classify_line)
   sort.rs       — sort comparator and options (SortOptions, compare)
-  blocks.rs     — block-level sorting (sort_blocks, sort_inline, deduplicate_blocks, DeduplicateError)
+  blocks.rs     — block-level sorting (sort_blocks, sort_inline, deduplicate_blocks, aggregate_blocks, DeduplicateError, AggregateError)
   output.rs     — output reconstruction (OutputOptions, render_line)
 ```
 
@@ -455,6 +486,23 @@ warning preserves the pipeline while surfacing the issue.
 Input may be intentionally duplicated (e.g. two separate config blocks that both
 reference the same address). Silent deduplication would be a destructive
 surprise. `--unique` is the explicit opt-in.
+
+### Why does `--aggregate` error on multi-IP lines in cross-line aggregation?
+
+When a multi-IP line is involved in a cross-line aggregation, it is unclear
+which IP on the line should be replaced with the supernet and what should happen
+to the others. Silently dropping or mutating a multi-IP line could corrupt the
+surrounding document in ways that are hard to detect. An error forces the user
+to resolve the ambiguity explicitly, consistent with how `--unique` handles the
+same situation.
+
+### Why does `--aggregate` subsume `--unique`?
+
+Aggregation produces a minimal non-overlapping set of CIDRs by definition — no
+two output CIDRs can cover the same address. Deduplication after aggregation
+would be a no-op. Silently ignoring `--unique` when `--aggregate` is set avoids
+surprising interactions without requiring the user to know that the flags
+overlap.
 
 ### Why prefix-length ascending on tie-break?
 

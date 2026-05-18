@@ -6,6 +6,10 @@ format.
 
 `modctl` adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## unreleased
+
+Add support for `--aggregate` option to condense/merge contiguous CIDR blocks.
+
 ## v1.0.0 - 2026/05/16
 
 Initial release

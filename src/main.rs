@@ -17,7 +17,9 @@
 
 use clap::{CommandFactory, Parser};
 use clap_complete::{Shell, generate};
-use ipsort::blocks::{deduplicate_blocks, sort_blocks, sort_inline};
+use ipsort::blocks::{
+    aggregate_blocks, deduplicate_blocks, sort_blocks, sort_inline,
+};
 use ipsort::classify::{ClassifiedLine, classify_line};
 use ipsort::output::{IpsOnlyMode, OutputOptions, render_line};
 use ipsort::sort::SortOptions;
@@ -64,6 +66,10 @@ struct Cli {
     /// Strip decoration but preserve non-IP lines as block separators
     #[arg(long, conflicts_with = "ips_only")]
     ips_only_with_structure: bool,
+
+    /// Merge adjacent CIDRs into their minimal supernet representation
+    #[arg(short = 'a', long)]
+    aggregate: bool,
 
     /// Generate shell completions for the given shell and print to stdout
     #[arg(long, value_name = "SHELL", hide = true)]
@@ -133,14 +139,31 @@ fn main() {
         std::process::exit(1);
     }
 
-    // Sort and deduplicate
+    // Sort, aggregate, and deduplicate
     let sorted = if cli.inline {
-        // --inline: sort all IPs globally across the entire input,
-        // dedup is folded into sort_inline when --unique is set
         sort_inline(classified, &sort_opts, cli.unique)
     } else {
         let sorted = sort_blocks(classified, &sort_opts);
-        if cli.unique {
+
+        let sorted = if cli.aggregate {
+            match aggregate_blocks(sorted, &sort_opts) {
+                Ok(lines) => lines,
+                Err(e) => {
+                    eprintln!(
+                        "ipsort: --aggregate: multi-IP line {:?} would be involved in aggregation to {}",
+                        e.line, e.aggregate
+                    );
+                    eprintln!(
+                        "ipsort: --aggregate: cannot determine which IP to replace; clean up input and try again"
+                    );
+                    std::process::exit(1);
+                }
+            }
+        } else {
+            sorted
+        };
+
+        if cli.unique && !cli.aggregate {
             match deduplicate_blocks(sorted, &out_opts.ips_only) {
                 Ok(lines) => lines,
                 Err(e) => {

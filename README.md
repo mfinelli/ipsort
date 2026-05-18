@@ -16,6 +16,8 @@ reordering only the addresses.
   independently sorted groups
 - `--inline` mode for sorting IPs spread across multiple lines within a single
   logical unit
+- `--aggregate` to merge adjacent CIDRs into their minimal supernet
+  representation
 - `--unique` deduplication by normalized CIDR
 - `--normalize` for canonical network string output
 - `--ips-only` and `--ips-only-with-structure` for extracting bare addresses
@@ -70,6 +72,7 @@ stdin.
 | `--reverse`                 | `-r`  | Reverse the sort order                                               |
 | `--ipv6-first`              |       | Sort IPv6 before IPv4 in mixed input                                 |
 | `--unique`                  | `-u`  | Deduplicate by normalized CIDR, keeping first occurrence             |
+| `--aggregate`               | `-a`  | Merge adjacent CIDRs into their minimal supernet representation      |
 | `--inline`                  | `-i`  | Sort all IPs globally across the entire input                        |
 | `--normalize`               | `-n`  | Emit canonical network strings (clears host bits, adds `/32`/`/128`) |
 | `--ips-only`                |       | Strip decoration, emit one bare IP per line, discard non-IP lines    |

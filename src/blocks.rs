@@ -52,6 +52,9 @@
 //!   pool, sorts globally, then redistributes sorted IPs back into their
 //!   original span positions. Block separator logic does not apply.
 //!
+//! After sorting, [`aggregate_blocks`] can be used to merge adjacent CIDRs
+//! into their minimal supernet representation.
+//!
 //! # Error handling
 //! Both sorting functions are pure transformations and do not check whether
 //! any IP addresses were found. The caller is responsible for erroring if the
@@ -60,11 +63,14 @@
 //! `deduplicate_blocks` returns a [`DeduplicateError`] if a duplicate is found
 //! on a multi-IP line in non-ips-only mode, since the correct action is
 //! ambiguous and silently dropping content would be surprising.
+//!
+//! `aggregate_blocks` returns an [`AggregateError`] if a cross-line
+//! aggregation involves a multi-IP line, for the same reason.
 
 use crate::classify::{ClassifiedLine, Span};
 use crate::output::IpsOnlyMode;
 use crate::sort::{SortOptions, compare};
-use ipnet::IpNet;
+use ipnet::{IpNet, Ipv4Net, Ipv6Net};
 use std::collections::HashSet;
 
 /// Sort [`ClassifiedLine::HasIp`] lines within each block, preserving
@@ -421,6 +427,231 @@ pub fn sort_inline(
         .collect()
 }
 
+/// Error returned when `--aggregate` encounters a multi-IP line that is
+/// involved in a cross-line aggregation.
+///
+/// The caller should print `line` and `aggregate` in a helpful error message
+/// and exit with a non-zero status code.
+#[derive(Debug)]
+pub struct AggregateError {
+    /// The original line content that caused the error.
+    pub line: String,
+    /// The aggregated CIDR that the line's IP would have merged into.
+    pub aggregate: IpNet,
+}
+
+/// Aggregate adjacent CIDR blocks into their minimal supernet representation,
+/// per block.
+///
+/// Uses [`ipnet::aggregate`] to compute the minimal set of CIDRs covering the
+/// same address space as the input. For each aggregated CIDR:
+///
+/// - The first input line whose IP is a subnet of the aggregated CIDR becomes
+///   the "winner" (its `Ip` span is substituted with the aggregated CIDR and
+///   the line is kept).
+/// - All other input lines whose IPs are covered by the same aggregated CIDR
+///   are dropped.
+/// - Input lines whose IPs were not involved in any aggregation pass through
+///   unchanged with their original token string.
+///
+/// Returns [`AggregateError`] if a cross-line aggregation involves a multi-IP
+/// line, since it is ambiguous which IP on the line to replace and whether to
+/// drop the line. Single-IP lines are always unambiguous.
+///
+/// Block separator ([`ClassifiedLine::NoIp`]) lines are preserved in place.
+pub fn aggregate_blocks(
+    lines: Vec<ClassifiedLine>,
+    opts: &SortOptions,
+) -> Result<Vec<ClassifiedLine>, AggregateError> {
+    let mut output: Vec<ClassifiedLine> = Vec::with_capacity(lines.len());
+    let mut buffer: Vec<ClassifiedLine> = Vec::new();
+
+    for line in lines {
+        match line {
+            ClassifiedLine::HasIp { .. } => buffer.push(line),
+            ClassifiedLine::NoIp(_) => {
+                aggregate_flush(&mut buffer, &mut output, opts)?;
+                output.push(line);
+            }
+        }
+    }
+    aggregate_flush(&mut buffer, &mut output, opts)?;
+    Ok(output)
+}
+
+/// Aggregate a buffer of [`ClassifiedLine::HasIp`] lines and drain into
+/// output.
+fn aggregate_flush(
+    buffer: &mut Vec<ClassifiedLine>,
+    output: &mut Vec<ClassifiedLine>,
+    opts: &SortOptions,
+) -> Result<(), AggregateError> {
+    if buffer.is_empty() {
+        return Ok(());
+    }
+
+    // Collect all IPs from the buffer, tagged with their line index
+    let mut ip_to_line: Vec<(IpNet, usize)> = Vec::new();
+    for (i, line) in buffer.iter().enumerate() {
+        if let ClassifiedLine::HasIp { spans, .. } = line {
+            for span in spans {
+                if let Span::Ip(t) = span {
+                    if let Some(net) = t.network() {
+                        ip_to_line.push((*net, i));
+                    }
+                }
+            }
+        }
+    }
+
+    // Separate into IPv4 and IPv6 for aggregation (ipnet::aggregate is per-family)
+    let ipv4: Vec<Ipv4Net> = ip_to_line
+        .iter()
+        .filter_map(|(n, _)| match n {
+            IpNet::V4(v4) => Some(*v4),
+            IpNet::V6(_) => None,
+        })
+        .collect();
+    let ipv6: Vec<Ipv6Net> = ip_to_line
+        .iter()
+        .filter_map(|(n, _)| match n {
+            IpNet::V6(v6) => Some(*v6),
+            IpNet::V4(_) => None,
+        })
+        .collect();
+
+    let aggregated_v4: Vec<IpNet> = Ipv4Net::aggregate(&ipv4)
+        .into_iter()
+        .map(IpNet::V4)
+        .collect();
+    let aggregated_v6: Vec<IpNet> = Ipv6Net::aggregate(&ipv6)
+        .into_iter()
+        .map(IpNet::V6)
+        .collect();
+
+    // Sort aggregated results for consistent ordering
+    let mut aggregated = [aggregated_v4, aggregated_v6].concat();
+    aggregated.sort_by(|a, b| compare(a, b, opts));
+
+    // For each aggregated CIDR, find which input lines it covers
+    // Track which line indices have been consumed
+    let mut consumed: HashSet<usize> = HashSet::new();
+    // Map from line index to the aggregated CIDR that won for it
+    let mut winner: Vec<Option<IpNet>> = vec![None; buffer.len()];
+
+    for agg in &aggregated {
+        // Find all line indices whose IPs are subnets of this aggregate
+        let covered: Vec<usize> = ip_to_line
+            .iter()
+            .filter(|(net, _)| agg.contains(net))
+            .map(|(_, i)| *i)
+            .collect();
+
+        if covered.is_empty() {
+            continue;
+        }
+
+        // Check for multi-IP lines involved in cross-line aggregation
+        let unique_lines: HashSet<usize> = covered.iter().copied().collect();
+        let is_cross_line = unique_lines.len() > 1;
+
+        if is_cross_line {
+            for &idx in &covered {
+                if let ClassifiedLine::HasIp { spans, .. } = &buffer[idx] {
+                    let ip_count = spans
+                        .iter()
+                        .filter(|s| matches!(s, Span::Ip(_)))
+                        .count();
+                    if ip_count > 1 {
+                        let line_str: String = spans
+                            .iter()
+                            .map(|s| match s {
+                                Span::Ip(t) => t.original(),
+                                Span::NonIp(s) => s.as_str(),
+                            })
+                            .collect();
+                        return Err(AggregateError {
+                            line: line_str,
+                            aggregate: *agg,
+                        });
+                    }
+                }
+            }
+        }
+
+        // First uncovered line index wins
+        let first_winner =
+            covered.iter().find(|&&i| !consumed.contains(&i)).copied();
+
+        if let Some(win_idx) = first_winner {
+            winner[win_idx] = Some(*agg);
+            for idx in covered {
+                consumed.insert(idx);
+            }
+        }
+    }
+
+    // Reconstruct output lines
+    for (i, line) in buffer.drain(..).enumerate() {
+        if !consumed.contains(&i) {
+            // Not involved in any aggregation: pass through unchanged
+            output.push(line);
+            continue;
+        }
+
+        match winner[i] {
+            None => {
+                // This line was consumed by another line's aggregation: drop
+                // it
+            }
+            Some(agg_net) => {
+                // This line wins: substitute its first Ip span with the
+                // aggregated CIDR
+                if let ClassifiedLine::HasIp {
+                    spans, warnings, ..
+                } = line
+                {
+                    use crate::parse::ParsedToken;
+                    let mut substituted = false;
+                    let new_spans: Vec<Span> = spans
+                        .into_iter()
+                        .map(|span| {
+                            if !substituted {
+                                if let Span::Ip(_) = &span {
+                                    substituted = true;
+                                    return Span::Ip(ParsedToken::ValidCidr {
+                                        original: agg_net.to_string(),
+                                        network: agg_net,
+                                        had_host_bits: false,
+                                    });
+                                }
+                            }
+                            span
+                        })
+                        .collect();
+
+                    let sort_key = new_spans
+                        .iter()
+                        .filter_map(|s| match s {
+                            Span::Ip(t) => t.network().copied(),
+                            Span::NonIp(_) => None,
+                        })
+                        .min_by(|a, b| compare(a, b, opts))
+                        .unwrap_or(agg_net);
+
+                    output.push(ClassifiedLine::HasIp {
+                        spans: new_spans,
+                        sort_key,
+                        warnings,
+                    });
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -471,6 +702,12 @@ mod tests {
             }
             ClassifiedLine::NoIp(_) => 0,
         }
+    }
+
+    fn agg(
+        lines: Vec<ClassifiedLine>,
+    ) -> Result<Vec<ClassifiedLine>, AggregateError> {
+        aggregate_blocks(lines, &opts())
     }
 
     fn dedup(
@@ -1008,5 +1245,152 @@ mod tests {
         let result = sort_inline(lines, &opts, false);
         assert_eq!(sort_key(&result[0]), net("192.168.0.0/16"));
         assert_eq!(sort_key(&result[1]), net("10.0.0.0/8"));
+    }
+
+    #[test]
+    fn test_two_halves_aggregate_to_supernet() {
+        let lines = vec![classify("10.0.0.0/25"), classify("10.0.0.128/25")];
+        let result = agg(lines).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(sort_key(&result[0]), net("10.0.0.0/24"));
+    }
+
+    #[test]
+    fn test_four_subnets_aggregate() {
+        let lines = vec![
+            classify("10.0.0.0/24"),
+            classify("10.0.1.0/24"),
+            classify("10.0.2.0/24"),
+            classify("10.0.3.0/24"),
+        ];
+        let result = agg(lines).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(sort_key(&result[0]), net("10.0.0.0/22"));
+    }
+
+    #[test]
+    fn test_no_aggregation_possible() {
+        let lines = vec![classify("10.0.0.0/24"), classify("192.168.0.0/24")];
+        let result = agg(lines).unwrap();
+        assert_eq!(result.len(), 2);
+    }
+
+    #[test]
+    fn test_partial_aggregation() {
+        let lines = vec![
+            classify("10.0.0.0/25"),
+            classify("10.0.0.128/25"),
+            classify("192.168.0.0/24"),
+        ];
+        let result = agg(lines).unwrap();
+        assert_eq!(result.len(), 2);
+        assert_eq!(sort_key(&result[0]), net("10.0.0.0/24"));
+        assert_eq!(sort_key(&result[1]), net("192.168.0.0/24"));
+    }
+
+    #[test]
+    fn test_winner_line_decoration_preserved() {
+        let lines =
+            vec![classify("- 10.0.0.0/25"), classify("- 10.0.0.128/25")];
+        let result = agg(lines).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(render(&result[0]), "- 10.0.0.0/24");
+    }
+
+    #[test]
+    fn test_first_line_wins() {
+        // First line's decoration should be preserved
+        let lines = vec![
+            classify("first: 10.0.0.0/25"),
+            classify("second: 10.0.0.128/25"),
+        ];
+        let result = agg(lines).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(render(&result[0]), "first: 10.0.0.0/24");
+    }
+
+    #[test]
+    fn test_aggregation_per_block() {
+        // Two blocks (aggregation should happen independently per block)
+        let lines = vec![
+            classify("10.0.0.0/25"),
+            classify("10.0.0.128/25"),
+            classify(""),
+            classify("10.0.0.0/25"), // same IPs in second block
+            classify("10.0.0.128/25"),
+        ];
+        let result = agg(lines).unwrap();
+        // Each block aggregates independently
+        assert_eq!(result.len(), 3); // 1 aggregated + separator + 1 aggregated
+        assert!(matches!(&result[1], ClassifiedLine::NoIp(_)));
+        assert_eq!(sort_key(&result[0]), net("10.0.0.0/24"));
+        assert_eq!(sort_key(&result[2]), net("10.0.0.0/24"));
+    }
+
+    #[test]
+    fn test_separator_preserved_after_aggregation() {
+        let lines = vec![
+            classify("10.0.0.0/25"),
+            classify("10.0.0.128/25"),
+            classify("# comment"),
+            classify("192.168.0.0/24"),
+        ];
+        let result = agg(lines).unwrap();
+        assert_eq!(result.len(), 3);
+        assert!(matches!(&result[1], ClassifiedLine::NoIp(_)));
+    }
+
+    #[test]
+    fn test_multi_ip_line_cross_line_aggregation_errors() {
+        // Multi-IP line involved in cross-line aggregation
+        let lines = vec![
+            classify("10.0.0.0/25 192.168.0.0/24"),
+            classify("10.0.0.128/25"),
+        ];
+        assert!(agg(lines).is_err());
+    }
+
+    #[test]
+    fn test_error_contains_aggregate_and_line() {
+        let lines = vec![
+            classify("10.0.0.0/25 192.168.0.0/24"),
+            classify("10.0.0.128/25"),
+        ];
+        let err = agg(lines).unwrap_err();
+        assert_eq!(err.aggregate, net("10.0.0.0/24"));
+        assert!(err.line.contains("10.0.0.0/25"));
+    }
+
+    #[test]
+    fn test_multi_ip_line_no_cross_line_ok() {
+        // Multi-IP line where neither IP aggregates with another line
+        let lines = vec![
+            classify("10.0.0.0/25 192.168.0.0/24"),
+            classify("172.16.0.0/24"),
+        ];
+        assert!(agg(lines).is_ok());
+    }
+
+    #[test]
+    fn test_ipv6_aggregation() {
+        let lines =
+            vec![classify("2001:db8::/33"), classify("2001:db8:8000::/33")];
+        let result = agg(lines).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(sort_key(&result[0]), net("2001:db8::/32"));
+    }
+
+    #[test]
+    fn test_aggregate_single_line_unchanged() {
+        let lines = vec![classify("10.0.0.0/24")];
+        let result = agg(lines).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(render(&result[0]), "10.0.0.0/24");
+    }
+
+    #[test]
+    fn test_aggregate_empty_input() {
+        let result = agg(vec![]).unwrap();
+        assert!(result.is_empty());
     }
 }

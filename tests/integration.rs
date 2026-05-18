@@ -458,3 +458,128 @@ fn test_success_exits_zero() {
 fn test_invalid_flag_exits_nonzero() {
     ipsort().args(["--not-a-flag"]).assert().failure();
 }
+
+#[test]
+fn test_aggregate_two_halves() {
+    ipsort()
+        .args(["--aggregate"])
+        .write_stdin("10.0.0.0/25\n10.0.0.128/25\n")
+        .assert()
+        .success()
+        .stdout("10.0.0.0/24\n");
+}
+
+#[test]
+fn test_aggregate_short_flag() {
+    ipsort()
+        .args(["-a"])
+        .write_stdin("10.0.0.0/25\n10.0.0.128/25\n")
+        .assert()
+        .success()
+        .stdout("10.0.0.0/24\n");
+}
+
+#[test]
+fn test_aggregate_four_subnets() {
+    ipsort()
+        .args(["--aggregate"])
+        .write_stdin("10.0.0.0/24\n10.0.1.0/24\n10.0.2.0/24\n10.0.3.0/24\n")
+        .assert()
+        .success()
+        .stdout("10.0.0.0/22\n");
+}
+
+#[test]
+fn test_aggregate_partial() {
+    ipsort()
+        .args(["--aggregate"])
+        .write_stdin("10.0.0.0/25\n10.0.0.128/25\n192.168.0.0/24\n")
+        .assert()
+        .success()
+        .stdout("10.0.0.0/24\n192.168.0.0/24\n");
+}
+
+#[test]
+fn test_aggregate_no_aggregation_possible() {
+    ipsort()
+        .args(["--aggregate"])
+        .write_stdin("10.0.0.0/24\n192.168.0.0/24\n")
+        .assert()
+        .success()
+        .stdout("10.0.0.0/24\n192.168.0.0/24\n");
+}
+
+#[test]
+fn test_aggregate_preserves_decoration() {
+    ipsort()
+        .args(["--aggregate"])
+        .write_stdin("- 10.0.0.0/25\n- 10.0.0.128/25\n")
+        .assert()
+        .success()
+        .stdout("- 10.0.0.0/24\n");
+}
+
+#[test]
+fn test_aggregate_first_line_wins_decoration() {
+    ipsort()
+        .args(["--aggregate"])
+        .write_stdin("first: 10.0.0.0/25\nsecond: 10.0.0.128/25\n")
+        .assert()
+        .success()
+        .stdout("first: 10.0.0.0/24\n");
+}
+
+#[test]
+fn test_aggregate_per_block() {
+    ipsort()
+        .args(["--aggregate"])
+        .write_stdin(
+            "10.0.0.0/25\n10.0.0.128/25\n\n192.168.0.0/25\n192.168.0.128/25\n",
+        )
+        .assert()
+        .success()
+        .stdout("10.0.0.0/24\n\n192.168.0.0/24\n");
+}
+
+#[test]
+fn test_aggregate_separator_preserved() {
+    ipsort()
+        .args(["--aggregate"])
+        .write_stdin("10.0.0.0/25\n10.0.0.128/25\n# comment\n192.168.0.0/24\n")
+        .assert()
+        .success()
+        .stdout("10.0.0.0/24\n# comment\n192.168.0.0/24\n");
+}
+
+#[test]
+fn test_aggregate_multi_ip_line_error() {
+    ipsort()
+        .args(["--aggregate"])
+        .write_stdin("10.0.0.0/25 192.168.0.0/24\n10.0.0.128/25\n")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("--aggregate"))
+        .stderr(predicate::str::contains("10.0.0.0/24"));
+}
+
+#[test]
+fn test_aggregate_ipv6() {
+    ipsort()
+        .args(["--aggregate"])
+        .write_stdin("2001:db8::/33\n2001:db8:8000::/33\n")
+        .assert()
+        .success()
+        .stdout("2001:db8::/32\n");
+}
+
+#[test]
+fn test_aggregate_with_reverse() {
+    ipsort()
+        .args(["--aggregate", "--reverse"])
+        .write_stdin(
+            "10.0.0.0/25\n10.0.0.128/25\n192.168.0.0/25\n192.168.0.128/25\n",
+        )
+        .assert()
+        .success()
+        .stdout("192.168.0.0/24\n10.0.0.0/24\n");
+}

@@ -75,6 +75,22 @@ preserved in place.
 
 	*--ips-only* and *--ips-only-with-structure* are mutually exclusive.
 
+*-a*, *--aggregate*
+	Merge adjacent CIDR blocks into their minimal supernet representation.
+	For each group of CIDRs that can be combined, the first line in the group
+	becomes the output line with the aggregated CIDR substituted in; remaining
+	lines in the group are dropped. Surrounding decoration on the winning line
+	is preserved.
+
+	Aggregation is applied per block. Use *--inline* for global aggregation
+	across the entire input.
+
+	For multi-IP lines involved in a cross-line aggregation, *--aggregate*
+	returns an error. Clean up the input and try again.
+
+	Subsumes *--unique*: if *--aggregate* is set, *--unique* has no additional
+	effect.
+
 # INPUT FORMAT
 
 *ipsort* tokenizes each line by splitting on any character that cannot appear
@@ -229,6 +245,31 @@ $ ipsort --reverse 10.0.0.0/8 172.16.0.0/12 192.168.1.0/24
 192.168.1.0/24
 172.16.0.0/12
 10.0.0.0/8
+```
+
+Aggregate subnets into their minimal supernet:
+
+```
+$ cat <<EOF | ipsort --aggregate
+10.0.0.0/25
+10.0.0.128/25
+10.0.1.0/24
+192.168.0.0/24
+EOF
+10.0.0.0/23
+192.168.0.0/24
+```
+
+Aggregate a YAML list, preserving decoration on the winning line:
+
+```
+$ cat <<EOF | ipsort --aggregate
+- 10.0.0.0/25
+- 10.0.0.128/25
+- 192.168.0.0/24
+EOF
+- 10.0.0.0/24
+- 192.168.0.0/24
 ```
 
 # NOTES
