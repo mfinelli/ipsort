@@ -70,8 +70,8 @@ stdin.
 | `--reverse`                 | `-r`  | Reverse the sort order                                               |
 | `--ipv6-first`              |       | Sort IPv6 before IPv4 in mixed input                                 |
 | `--unique`                  | `-u`  | Deduplicate by normalized CIDR, keeping first occurrence             |
-| `--inline`                  |       | Sort all IPs globally across the entire input                        |
-| `--normalize`               |       | Emit canonical network strings (clears host bits, adds `/32`/`/128`) |
+| `--inline`                  | `-i`  | Sort all IPs globally across the entire input                        |
+| `--normalize`               | `-n`  | Emit canonical network strings (clears host bits, adds `/32`/`/128`) |
 | `--ips-only`                |       | Strip decoration, emit one bare IP per line, discard non-IP lines    |
 | `--ips-only-with-structure` |       | Strip decoration, emit one bare IP per line, preserve non-IP lines   |
 

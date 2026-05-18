@@ -317,12 +317,12 @@ into span positions. Lines that become empty after dedup are kept in place
 
 | Flag                        | Description                                                                                    |
 | --------------------------- | ---------------------------------------------------------------------------------------------- |
-| `--inline`                  | Reorder all IP tokens freely across the entire input rather than sorting per block             |
+| `--inline` / `-i`           | Reorder all IP tokens freely across the entire input rather than sorting per block             |
 | `--unique` / `-u`           | Deduplicate by normalized CIDR, keeping first occurrence                                       |
 | `--ips-only`                | Discard all non-IP content and non-IP lines; emit one bare address per line                    |
 | `--ips-only-with-structure` | Strip decoration but preserve non-IP lines as block separators; emit one bare address per line |
-| `--normalize`               | Emit canonical network strings (clears host bits, adds `/32`/`/128` to bare IPs)               |
-| `--reverse`                 | Reverse the sort order                                                                         |
+| `--normalize` / `-r`        | Emit canonical network strings (clears host bits, adds `/32`/`/128` to bare IPs)               |
+| `--reverse` / `-n`          | Reverse the sort order                                                                         |
 | `--ipv6-first`              | In mixed IPv4/IPv6 input, sort IPv6 addresses before IPv4                                      |
 
 `--ips-only` and `--ips-only-with-structure` are mutually exclusive.

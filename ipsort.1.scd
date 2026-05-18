@@ -48,7 +48,7 @@ preserved in place.
 	*--ips-only* or *--ips-only-with-structure* is set, each IP on a multi-IP
 	line is checked independently and duplicates are removed without error.
 
-*--inline*
+*-i*, *--inline*
 	Collect all IP addresses from the entire input into one pool, sort
 	globally, then redistribute sorted IPs back into their original positions.
 	Decoration and surrounding content are preserved. Block separator logic
@@ -57,7 +57,7 @@ preserved in place.
 	Useful when IPs are spread across multiple lines within a single logical
 	unit, such as a multi-line YAML value.
 
-*--normalize*
+*-n*, *--normalize*
 	Emit canonical network strings instead of the original token. Host bits are
 	cleared (_10.0.0.5/24_ becomes _10.0.0.0/24_) and bare IPs gain explicit
 	prefix lengths (_192.168.1.1_ becomes _192.168.1.1/32_). Surrounding

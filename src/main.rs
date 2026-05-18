@@ -50,11 +50,11 @@ struct Cli {
     unique: bool,
 
     /// Reorder all IP tokens freely across the entire input
-    #[arg(long)]
+    #[arg(short, long)]
     inline: bool,
 
     /// Emit canonical network strings (clears host bits, adds /32 or /128)
-    #[arg(long)]
+    #[arg(short, long)]
     normalize: bool,
 
     /// Strip all non-IP content and emit one bare address per line
