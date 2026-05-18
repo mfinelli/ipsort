@@ -56,7 +56,7 @@ use ipnet::IpNet;
 ///
 /// Lines are represented as `Vec<Span>` to preserve full structural
 /// information for output reconstruction.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum Span {
     /// A recognized IP address or CIDR block.
     Ip(ParsedToken),
@@ -66,7 +66,7 @@ pub enum Span {
 }
 
 /// A line of input after classification.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum ClassifiedLine {
     /// The line contains at least one recognizable IP address or CIDR.
     HasIp {

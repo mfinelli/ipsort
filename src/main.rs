@@ -68,8 +68,14 @@ struct Cli {
     ips_only_with_structure: bool,
 
     /// Merge adjacent CIDRs into their minimal supernet representation
-    #[arg(short = 'a', long)]
+    #[arg(short, long)]
     aggregate: bool,
+
+    /// Check whether input is already sorted; exit 0 if so, 1 if not. No
+    /// output is printed. Reports the first out-of-order line to stderr on
+    /// failure.
+    #[arg(short, long)]
+    check: bool,
 
     /// Generate shell completions for the given shell and print to stdout
     #[arg(long, value_name = "SHELL", hide = true)]
@@ -139,6 +145,13 @@ fn main() {
         std::process::exit(1);
     }
 
+    // Save a clone of classified lines for --check comparison before sorting
+    let classified_for_check: Vec<ClassifiedLine> = if cli.check {
+        classified.clone()
+    } else {
+        vec![]
+    };
+
     // Sort, aggregate, and deduplicate
     let sorted = if cli.inline {
         sort_inline(classified, &sort_opts, cli.unique)
@@ -182,14 +195,62 @@ fn main() {
         }
     };
 
-    // Render and print
-    for line in &sorted {
+    // Render sorted output
+    let sorted_rendered: Vec<String> = sorted
+        .iter()
+        .flat_map(|line| render_line(line, &out_opts, &sort_opts))
+        .collect();
+
+    if cli.check {
+        // Render the unsorted classified lines through the same output options
+        // to get a comparable stream (same decoration stripping, normalization,
+        // etc.)
+        let unsorted_rendered: Vec<String> = classified_for_check
+            .iter()
+            .flat_map(|line| render_line(line, &out_opts, &sort_opts))
+            .collect();
+
+        // Compare the two streams
+        for (i, (unsorted, sorted)) in unsorted_rendered
+            .iter()
+            .zip(sorted_rendered.iter())
+            .enumerate()
+        {
+            if unsorted != sorted {
+                eprintln!(
+                    "ipsort: check failed: line {} is out of order: {:?}",
+                    i + 1,
+                    unsorted
+                );
+                std::process::exit(1);
+            }
+        }
+        // Also check length difference (e.g. --unique or --aggregate removed
+        // lines)
+        if unsorted_rendered.len() != sorted_rendered.len() {
+            eprintln!(
+                "ipsort: check failed: input has {} lines but sorted output has {}",
+                unsorted_rendered.len(),
+                sorted_rendered.len()
+            );
+            std::process::exit(1);
+        }
+        // All good
+        std::process::exit(0);
+    }
+
+    // Normal output
+    for (line, rendered_lines) in sorted.iter().zip(
+        sorted
+            .iter()
+            .map(|line| render_line(line, &out_opts, &sort_opts)),
+    ) {
         if let ClassifiedLine::HasIp { warnings, .. } = line {
             for w in warnings {
                 eprintln!("{w}");
             }
         }
-        for rendered in render_line(line, &out_opts, &sort_opts) {
+        for rendered in rendered_lines {
             println!("{rendered}");
         }
     }

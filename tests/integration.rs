@@ -583,3 +583,134 @@ fn test_aggregate_with_reverse() {
         .success()
         .stdout("192.168.0.0/24\n10.0.0.0/24\n");
 }
+
+#[test]
+fn test_check_already_sorted_exits_zero() {
+    ipsort()
+        .args(["--check"])
+        .write_stdin("10.0.0.0/8\n172.16.0.0/12\n192.168.0.0/16\n")
+        .assert()
+        .success()
+        .stdout("");
+}
+
+#[test]
+fn test_check_unsorted_exits_nonzero() {
+    ipsort()
+        .args(["--check"])
+        .write_stdin("192.168.0.0/16\n10.0.0.0/8\n")
+        .assert()
+        .failure();
+}
+
+#[test]
+fn test_check_reports_first_out_of_order_line() {
+    ipsort()
+        .args(["--check"])
+        .write_stdin("192.168.0.0/16\n10.0.0.0/8\n")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("192.168.0.0/16"))
+        .stderr(predicate::str::contains("line 1"));
+}
+
+#[test]
+fn test_check_no_stdout_on_failure() {
+    ipsort()
+        .args(["--check"])
+        .write_stdin("192.168.0.0/16\n10.0.0.0/8\n")
+        .assert()
+        .failure()
+        .stdout("");
+}
+
+#[test]
+fn test_check_no_stdout_on_success() {
+    ipsort()
+        .args(["--check"])
+        .write_stdin("10.0.0.0/8\n192.168.0.0/16\n")
+        .assert()
+        .success()
+        .stdout("");
+}
+
+#[test]
+fn test_check_short_flag() {
+    ipsort()
+        .args(["-c"])
+        .write_stdin("10.0.0.0/8\n192.168.0.0/16\n")
+        .assert()
+        .success();
+}
+
+#[test]
+fn test_check_with_unique_detects_duplicates() {
+    ipsort()
+        .args(["--check", "--unique"])
+        .write_stdin("10.0.0.0/8\n10.0.0.0/8\n192.168.0.0/16\n")
+        .assert()
+        .failure();
+}
+
+#[test]
+fn test_check_with_unique_passes_when_no_duplicates() {
+    ipsort()
+        .args(["--check", "--unique"])
+        .write_stdin("10.0.0.0/8\n192.168.0.0/16\n")
+        .assert()
+        .success();
+}
+
+#[test]
+fn test_check_with_aggregate_detects_unaggregated() {
+    ipsort()
+        .args(["--check", "--aggregate"])
+        .write_stdin("10.0.0.0/25\n10.0.0.128/25\n")
+        .assert()
+        .failure();
+}
+
+#[test]
+fn test_check_with_aggregate_passes_when_aggregated() {
+    ipsort()
+        .args(["--check", "--aggregate"])
+        .write_stdin("10.0.0.0/24\n192.168.0.0/24\n")
+        .assert()
+        .success();
+}
+
+#[test]
+fn test_check_with_ips_only_sorted() {
+    ipsort()
+        .args(["--check", "--ips-only"])
+        .write_stdin("- 10.0.0.0/8\n- 192.168.0.0/16\n")
+        .assert()
+        .success();
+}
+
+#[test]
+fn test_check_with_ips_only_unsorted() {
+    ipsort()
+        .args(["--check", "--ips-only"])
+        .write_stdin("- 192.168.0.0/16\n- 10.0.0.0/8\n")
+        .assert()
+        .failure();
+}
+
+#[test]
+fn test_check_with_block_separators_sorted() {
+    ipsort()
+        .args(["--check"])
+        .write_stdin("# group\n10.0.0.0/8\n192.168.0.0/16\n\n172.16.1.0/24\n172.16.2.0/24\n")
+        .assert()
+        .success();
+}
+
+#[test]
+fn test_check_with_block_separators_unsorted() {
+    ipsort()
+        .args(["--check"])
+        .write_stdin("# group\n192.168.0.0/16\n10.0.0.0/8\n")
+        .assert()
+        .failure();
+}

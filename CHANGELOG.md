@@ -8,7 +8,8 @@ format.
 
 ## unreleased
 
-Add support for `--aggregate` option to condense/merge contiguous CIDR blocks.
+- Add support for `--aggregate` option to condense/merge contiguous CIDR blocks.
+- Add support for `--check` option to check if input is already sorted.
 
 ## v1.0.0 - 2026/05/16
 

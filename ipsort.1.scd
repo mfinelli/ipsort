@@ -79,6 +79,17 @@ reordered, leaving comments, keys, blank lines, and all other content untouched.
 
 	*--ips-only* and *--ips-only-with-structure* are mutually exclusive.
 
+*-c*, *--check*
+	Check whether the input is already in the state the current flags would
+	produce. Exits 0 if no changes would be made, 1 otherwise. No output is
+	written to stdout. The first out-of-order or unsatisfied line is reported
+	to stderr on failure.
+
+	Combines naturally with other flags: *--check --unique* exits 1 if
+	duplicates exist; *--check --aggregate* exits 1 if any CIDRs can be
+	merged; *--check --normalize* exits 1 if any token is not in canonical
+	form.
+
 *-a*, *--aggregate*
 	Merge adjacent CIDR blocks into their minimal supernet representation.
 	For each group of CIDRs that can be combined, the first line in the group
@@ -249,6 +260,18 @@ $ ipsort --reverse 10.0.0.0/8 172.16.0.0/12 192.168.1.0/24
 192.168.1.0/24
 172.16.0.0/12
 10.0.0.0/8
+```
+
+Check whether a file is already sorted:
+
+```
+$ ipsort --check < addresses.txt && echo "sorted" || echo "not sorted"
+```
+
+Check whether a file has no duplicates:
+
+```
+$ ipsort --check --unique < addresses.txt
 ```
 
 Aggregate subnets into their minimal supernet:

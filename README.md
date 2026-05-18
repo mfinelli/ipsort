@@ -73,6 +73,7 @@ stdin.
 | `--ipv6-first`              |       | Sort IPv6 before IPv4 in mixed input                                 |
 | `--unique`                  | `-u`  | Deduplicate by normalized CIDR, keeping first occurrence             |
 | `--aggregate`               | `-a`  | Merge adjacent CIDRs into their minimal supernet representation      |
+| `--check`                   | `-c`  | Exit 0 if input is already sorted/aggregated/unique, 1 otherwise     |
 | `--inline`                  | `-i`  | Sort all IPs globally across the entire input                        |
 | `--normalize`               | `-n`  | Emit canonical network strings (clears host bits, adds `/32`/`/128`) |
 | `--ips-only`                |       | Strip decoration, emit one bare IP per line, discard non-IP lines    |
@@ -250,6 +251,19 @@ EOF
 10.0.0.0/8
 172.16.0.0/12
 192.168.1.0/24
+```
+
+**Check whether a file is already sorted (useful in CI):**
+
+```sh
+$ ipsort --check < addresses.txt && echo "sorted" || echo "not sorted"
+```
+
+With other flags, checks whether the input satisfies those conditions:
+
+```sh
+$ ipsort --check --unique < addresses.txt  # exits 1 if duplicates exist
+$ ipsort --check --aggregate < addresses.txt  # exits 1 if CIDRs can be merged
 ```
 
 **Sort in reverse:**

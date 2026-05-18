@@ -42,7 +42,7 @@ use std::str::FromStr;
 
 /// The result of attempting to parse a single string token as a CIDR or IP
 /// address.
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum ParsedToken {
     /// A valid CIDR block, possibly with host bits set in the original.
     ///

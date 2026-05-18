@@ -341,6 +341,27 @@ already produces a minimal non-overlapping set.
 IPs across the entire input are aggregated as one global pool rather than per
 block.
 
+### Check mode: `--check` / `-c`
+
+Checks whether the input is already in the state the current flags would
+produce, without writing any output to stdout. Exits 0 if no changes would be
+made, 1 if the input would be different after processing.
+
+On failure, reports the first out-of-order or unsatisfied line to stderr.
+
+Composes naturally with all other flags:
+
+- `--check` alone: is the input already sorted?
+- `--check --unique`: are there any duplicates?
+- `--check --aggregate`: can any CIDRs be merged?
+- `--check --normalize`: are all tokens already in canonical form?
+- `--check --ips-only`: are the bare IPs already in sorted order?
+
+**Implementation**: the classified lines are cloned before the sort pipeline
+runs. Both the pre-sort and post-sort classified lines are rendered through the
+same `OutputOptions`, producing two comparable streams. If the streams are
+identical the input was already in the correct state.
+
 ---
 
 ## Flags Summary
@@ -350,6 +371,7 @@ block.
 | `--inline` / `-i`           | Reorder all IP tokens freely across the entire input rather than sorting per block             |
 | `--unique` / `-u`           | Deduplicate by normalized CIDR, keeping first occurrence                                       |
 | `--aggregate` / `-a`        | Merge adjacent CIDRs into their minimal supernet representation                                |
+| `--check` / `-c`            | Exit 0 if input is already in the expected state, 1 otherwise                                  |
 | `--ips-only`                | Discard all non-IP content and non-IP lines; emit one bare address per line                    |
 | `--ips-only-with-structure` | Strip decoration but preserve non-IP lines as block separators; emit one bare address per line |
 | `--normalize` / `-r`        | Emit canonical network strings (clears host bits, adds `/32`/`/128` to bare IPs)               |
@@ -372,6 +394,7 @@ src/
   classify.rs   — line spanification and classification (Span, ClassifiedLine, classify_line)
   sort.rs       — sort comparator and options (SortOptions, compare)
   blocks.rs     — block-level sorting (sort_blocks, sort_inline, deduplicate_blocks, aggregate_blocks, DeduplicateError, AggregateError)
+  main.rs       — CLI entry point; also owns --check comparison logic
   output.rs     — output reconstruction (OutputOptions, render_line)
 ```
 
@@ -495,6 +518,15 @@ to the others. Silently dropping or mutating a multi-IP line could corrupt the
 surrounding document in ways that are hard to detect. An error forces the user
 to resolve the ambiguity explicitly, consistent with how `--unique` handles the
 same situation.
+
+### Why does `--check` render both streams through the same `OutputOptions`?
+
+Comparing raw input lines against rendered output would fail spuriously for
+flags like `--ips-only` (which strips decoration) or `--normalize` (which
+changes token strings). Rendering both the unsorted and sorted classified lines
+through the same `OutputOptions` ensures the comparison is always
+apples-to-apples — you are asking "would this pipeline change anything?" rather
+than "does the output look like the input?"
 
 ### Why does `--aggregate` subsume `--unique`?
 
