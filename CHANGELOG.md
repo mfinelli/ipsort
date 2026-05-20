@@ -6,6 +6,10 @@ format.
 
 `ipsort` adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v1.1.1 - 2026/05/20
+
+- Fix documentation typo.
+
 ## v1.1.0 - 2026/05/18
 
 - Add support for `--aggregate` option to condense/merge contiguous CIDR blocks.
