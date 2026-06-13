@@ -44,9 +44,10 @@ jobs:
       - run: cargo build --locked --release --verbose
       - run: cargo publish --dry-run
       - uses: actions/upload-artifact@v7
+        if: matrix.os == 'ubuntu'
         with:
           name: crate
-          path: target/package/*.crate
+          path: target/package/**/*.crate
           retention-days: 1
       - run: ./vcheck.bash
 
