@@ -32,6 +32,10 @@ target/release/ipsort.1: ipsort.1.scd
 	sed -e "s/__VERSION__/$(VERSION)/" -e "s/__DATE__/$(TODAY)/" \
 		$< | scdoc > $@
 
+www/favicon.ico: logo.png
+	mkdir -p www
+	magick $< -gravity center -crop 1000x1000+0+0 +repage -resize 16x16 $@
+
 install: all
 	install -Dm0755 target/release/ipsort "$(DESTDIR)$(PREFIX)/bin/ipsort"
 	install -Dm0644 README.md \
