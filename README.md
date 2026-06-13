@@ -38,6 +38,16 @@ mv ipsort ~/.local/bin/
 
 Shell completions and the manpage are included in the release archive.
 
+### From crates.io
+
+You need to have [cargo](https://doc.rust-lang.org/stable/cargo/) installed and
+then you can install [ipsort](https://crates.io/crates/ipsort) directly from
+[crates.io](https://crates.io):
+
+```sh
+cargo install ipsort
+```
+
 ### From source
 
 Requires Rust and `scdoc` (for the manpage).
