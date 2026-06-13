@@ -47,7 +47,7 @@ jobs:
         if: matrix.os == 'ubuntu'
         with:
           name: crate
-          path: target/package/**/*.crate
+          path: target/package/tmp-crate/*.crate
           retention-days: 1
       - run: ./vcheck.bash
 
