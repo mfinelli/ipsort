@@ -6,6 +6,11 @@ format.
 
 `ipsort` adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v1.3.0 - 2026/06/13
+
+This release publishes `ipsort` to [crates.io](https://crates.io) using
+[trusted publishing](https://crates.io/docs/trusted-publishing).
+
 ## v1.2.0 - 2026/06/13
 
 This release sets up publishing on [crates.io](https://crates.io) but using the

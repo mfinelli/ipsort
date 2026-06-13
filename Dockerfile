@@ -12,7 +12,7 @@ RUN cargo test
 FROM debian:stable-slim
 
 LABEL org.opencontainers.image.title=ipsort
-LABEL org.opencontainers.image.version=v1.2.0
+LABEL org.opencontainers.image.version=v1.3.0
 LABEL org.opencontainers.image.description="versitile ip address sorting tool"
 LABEL org.opencontainers.image.url=https://github.com/mfinelli/ipsort
 LABEL org.opencontainers.image.source=https://github.com/mfinelli/ipsort
