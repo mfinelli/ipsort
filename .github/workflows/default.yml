@@ -42,6 +42,7 @@ jobs:
       - run: cargo clippy --locked
       - run: cargo test --locked
       - run: cargo build --locked --release --verbose
+      - run: cargo publish --dry-run
       - run: ./vcheck.bash
 
   docker:

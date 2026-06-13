@@ -18,6 +18,15 @@ categories = [
   "value-formatting",
 ]
 
+include = [
+  "/CHANGELOG.md",
+  "/Cargo.*",
+  "/LICENSE",
+  "/README.md",
+  "/src/*",
+  "/tests/*",
+]
+
 [dependencies]
 clap = { version = "4.6.1", features = ["derive"] }
 clap_complete = { version = "4.6.5" }
