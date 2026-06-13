@@ -171,3 +171,38 @@ jobs:
           allowUpdates: true
           artifacts: ipsort_*.tar.*
           token: ${{ secrets.GITHUB_TOKEN }}
+
+  www:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: [release]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v6
+        with:
+          version: latest
+      - uses: actions/setup-node@v6
+        with:
+          cache: pnpm
+          node-version: lts/*
+      - uses: mfinelli/setup-imagemagick@v7
+      - run: pnpm ci
+      - run: make pubwww
+      - uses: actions/upload-artifact@v7
+        with:
+          name: www
+          path: www/**/*
+          retention-days: 1
+      - run: pnpm exec wrangler pages deploy www --project-name ipsort
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      - uses: mfinelli/cloudflare-pages-cleanup@v1
+        if: github.event_name != 'pull_request'
+        with:
+          cloudflare_account_id: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          cloudflare_api_token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          project: ipsort
+          min-to-keep: 3
+          max-to-keep: 3
