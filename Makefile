@@ -13,7 +13,7 @@ all: target/release/ipsort target/release/ipsort.1 target/release/ipsort.bash \
 	target/release/ipsort.fish target/release/ipsort.zsh
 
 clean:
-	rm -rf target
+	rm -rf target www
 
 target/release/ipsort: $(wildcard src/*.rs)
 	cargo build --frozen --release
@@ -32,9 +32,17 @@ target/release/ipsort.1: ipsort.1.scd
 	sed -e "s/__VERSION__/$(VERSION)/" -e "s/__DATE__/$(TODAY)/" \
 		$< | scdoc > $@
 
-www/favicon.ico: logo.png
+www:
 	mkdir -p www
+
+www/favicon.ico: logo.png www
 	magick $< -gravity center -crop 1000x1000+0+0 +repage -resize 16x16 $@
+
+www/_headers: _headers www
+	cp $< $@
+
+www/index.html: index.html www
+	cp $< $@
 
 install: all
 	install -Dm0755 target/release/ipsort "$(DESTDIR)$(PREFIX)/bin/ipsort"
@@ -58,4 +66,6 @@ uninstall:
 		"$(DESTDIR)$(PREFIX)/share/doc/zsh/site-functions/_ipsort" \
 		"$(DESTDIR)$(PREFIX)/share/man/man1/ipsort.1"
 
-.PHONY: all clean install uninstall
+pubwww: www www/favicon.ico www/_headers www/index.html
+
+.PHONY: all clean pubwww install uninstall
