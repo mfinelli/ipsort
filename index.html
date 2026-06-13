@@ -1,0 +1,518 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ipsort: sort IP addresses numerically</title>
+    <meta
+      name="description"
+      content="ipsort sorts IP addresses and CIDR blocks by their actual numeric value, preserving surrounding content like YAML keys, comments, and list markers."
+    />
+    <style>
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      :root {
+        --bg: #0f1117;
+        --surface: #1a1f2e;
+        --surface2: #242938;
+        --border: #2d3447;
+        --text: #e2e8f0;
+        --muted: #64748b;
+        --accent: #38bdf8;
+        --accent-dim: #0c4a6e;
+        --green: #4ade80;
+        --mono: "SF Mono", "Fira Code", "Cascadia Code", "Consolas", monospace;
+        --sans: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+      }
+
+      html {
+        font-size: 16px;
+      }
+
+      body {
+        background: var(--bg);
+        color: var(--text);
+        font-family: var(--sans);
+        line-height: 1.6;
+        min-height: 100vh;
+        padding: 0 1.25rem;
+      }
+
+      a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      a:hover {
+        text-decoration: underline;
+      }
+
+      .page {
+        max-width: 720px;
+        margin: 0 auto;
+        padding: 4rem 0 5rem;
+      }
+
+      header {
+        display: flex;
+        align-items: baseline;
+        gap: 1rem;
+        margin-bottom: 3rem;
+      }
+
+      .wordmark {
+        font-family: var(--mono);
+        font-size: 1.5rem;
+        font-weight: 700;
+        color: var(--accent);
+        letter-spacing: -0.02em;
+      }
+
+      .version {
+        font-family: var(--mono);
+        font-size: 0.75rem;
+        color: var(--muted);
+        background: var(--surface2);
+        border: 1px solid var(--border);
+        padding: 0.2em 0.5em;
+        border-radius: 4px;
+      }
+
+      .hero {
+        margin-bottom: 3.5rem;
+      }
+
+      .hero h1 {
+        font-size: clamp(1.6rem, 4vw, 2.2rem);
+        font-weight: 600;
+        line-height: 1.25;
+        letter-spacing: -0.02em;
+        margin-bottom: 0.75rem;
+      }
+
+      .hero h1 em {
+        font-style: normal;
+        color: var(--accent);
+      }
+
+      .hero p {
+        font-size: 1.0625rem;
+        color: #94a3b8;
+        max-width: 540px;
+      }
+
+      .terminal {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        overflow: hidden;
+        margin-bottom: 3.5rem;
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+      }
+
+      .terminal-bar {
+        background: var(--surface2);
+        border-bottom: 1px solid var(--border);
+        padding: 0.6rem 1rem;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+      }
+
+      .dot {
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+      }
+      .dot-red {
+        background: #ff5f57;
+      }
+      .dot-yellow {
+        background: #febc2e;
+      }
+      .dot-green {
+        background: #28c840;
+      }
+
+      .terminal-label {
+        font-family: var(--mono);
+        font-size: 0.7rem;
+        color: var(--muted);
+        margin-left: auto;
+      }
+
+      .terminal-body {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+      }
+
+      .terminal-col {
+        padding: 1.25rem 1.5rem;
+      }
+
+      .terminal-col:first-child {
+        border-right: 1px solid var(--border);
+      }
+
+      .col-label {
+        font-family: var(--mono);
+        font-size: 0.65rem;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        color: var(--muted);
+        margin-bottom: 0.75rem;
+      }
+
+      .terminal-col pre {
+        font-family: var(--mono);
+        font-size: 0.82rem;
+        line-height: 1.7;
+        white-space: pre;
+      }
+
+      .terminal-col.input pre {
+        color: #94a3b8;
+      }
+      .terminal-col.output pre {
+        color: var(--text);
+      }
+
+      .prompt {
+        color: var(--green);
+        user-select: none;
+      }
+
+      .cmd {
+        color: var(--accent);
+      }
+
+      .comment {
+        color: var(--muted);
+      }
+
+      .features {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 1px;
+        background: var(--border);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        overflow: hidden;
+        margin-bottom: 3.5rem;
+      }
+
+      .feature {
+        background: var(--surface);
+        padding: 1.25rem 1.5rem;
+      }
+
+      .feature-name {
+        font-family: var(--mono);
+        font-size: 0.8rem;
+        color: var(--accent);
+        margin-bottom: 0.35rem;
+      }
+
+      .feature p {
+        font-size: 0.875rem;
+        color: #94a3b8;
+        line-height: 1.5;
+      }
+
+      .cta {
+        margin-bottom: 2.5rem;
+      }
+
+      .install {
+        margin-bottom: 3.5rem;
+      }
+
+      .install h2 {
+        font-size: 1rem;
+        font-weight: 600;
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        margin-bottom: 1rem;
+      }
+
+      .code-block {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 0.875rem 1.25rem;
+        font-family: var(--mono);
+        font-size: 0.85rem;
+        color: var(--text);
+        margin-bottom: 0.5rem;
+      }
+
+      .code-block .prompt {
+        margin-right: 0.4em;
+      }
+
+      .install-note {
+        font-size: 0.8rem;
+        color: var(--muted);
+      }
+
+      footer {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding-top: 2rem;
+        border-top: 1px solid var(--border);
+        font-size: 0.825rem;
+        color: var(--muted);
+        flex-wrap: wrap;
+        gap: 0.75rem;
+      }
+
+      .github-link-hero {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5em;
+        color: var(--bg);
+        background: var(--accent);
+        padding: 0.55em 1.2em;
+        border-radius: 6px;
+        font-size: 0.9rem;
+        font-weight: 600;
+        transition: opacity 0.15s;
+      }
+
+      .github-link-hero:hover {
+        opacity: 0.88;
+        text-decoration: none;
+      }
+
+      .github-link-hero .github-icon {
+        fill: var(--bg);
+      }
+
+      .github-link {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4em;
+        color: var(--text);
+        border: 1px solid var(--border);
+        background: var(--surface2);
+        padding: 0.4em 0.85em;
+        border-radius: 6px;
+        font-size: 0.825rem;
+        transition: border-color 0.15s;
+      }
+
+      .github-link:hover {
+        border-color: var(--accent);
+        text-decoration: none;
+      }
+
+      .github-icon {
+        width: 16px;
+        height: 16px;
+        fill: currentColor;
+        flex-shrink: 0;
+      }
+
+      @media (max-width: 560px) {
+        .terminal-body {
+          grid-template-columns: 1fr;
+        }
+        .terminal-col:first-child {
+          border-right: none;
+          border-bottom: 1px solid var(--border);
+        }
+        .features {
+          grid-template-columns: 1fr;
+        }
+        header {
+          flex-wrap: wrap;
+        }
+      }
+
+      @media (prefers-reduced-motion: no-preference) {
+        .terminal {
+          transition: box-shadow 0.2s;
+        }
+        .terminal:hover {
+          box-shadow: 0 12px 48px rgba(56, 189, 248, 0.08);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <header>
+        <span class="wordmark">ipsort</span>
+        <span class="version">v1.1.1</span>
+      </header>
+
+      <section class="hero">
+        <h1>
+          Sort IP addresses <em>numerically</em>,<br />leave everything else
+          alone.
+        </h1>
+        <p>
+          Feed it a YAML file, a config snippet, a firewall ruleset and ipsort
+          reorders the CIDRs and hands everything else back untouched.
+        </p>
+      </section>
+
+      <div class="cta">
+        <a class="github-link-hero" href="https://github.com/mfinelli/ipsort">
+          <svg class="github-icon" viewBox="0 0 16 16" aria-hidden="true">
+            <path
+              d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38
+            0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13
+            -.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87
+            2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95
+            0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21
+            2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04
+            2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82
+            2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48
+            0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"
+            />
+          </svg>
+          View on GitHub
+        </a>
+      </div>
+
+      <div class="terminal">
+        <div class="terminal-bar">
+          <span class="dot dot-red"></span>
+          <span class="dot dot-yellow"></span>
+          <span class="dot dot-green"></span>
+          <span class="terminal-label">ipsort --inline &lt; ingress.yaml</span>
+        </div>
+        <div class="terminal-body">
+          <div class="terminal-col input">
+            <div class="col-label">before</div>
+            <pre><span class="comment">annotations:</span>
+  whitelist: &gt;-
+    192.168.1.0/24,
+    10.99.0.0/16,
+    10.0.0.0/8,
+    172.16.5.0/24
+<span class="comment">spec:</span>
+  host: app.example.com</pre>
+          </div>
+          <div class="terminal-col output">
+            <div class="col-label">after</div>
+            <pre><span class="comment">annotations:</span>
+  whitelist: &gt;-
+    10.0.0.0/8,
+    10.99.0.0/16,
+    172.16.5.0/24,
+    192.168.1.0/24
+<span class="comment">spec:</span>
+  host: app.example.com</pre>
+          </div>
+        </div>
+      </div>
+
+      <p style="font-size: 0.825rem; color: var(--muted); margin-bottom: 1rem">
+        A few highlights (see the
+        <a href="https://github.com/mfinelli/ipsort#readme"
+          >full feature list</a
+        >
+        on GitHub).
+      </p>
+      <div class="features">
+        <div class="feature">
+          <div class="feature-name">--inline</div>
+          <p>
+            Sort IPs across multiple lines as one pool. Useful for multi-line
+            annotation values.
+          </p>
+        </div>
+        <div class="feature">
+          <div class="feature-name">--aggregate</div>
+          <p>
+            Merge adjacent CIDRs into their minimal supernet.
+            <code
+              style="
+                font-family: var(--mono);
+                font-size: 0.8em;
+                color: var(--accent);
+              "
+              >10.0.0.0/25 + 10.0.0.128/25 → 10.0.0.0/24</code
+            >
+          </p>
+        </div>
+        <div class="feature">
+          <div class="feature-name">--unique</div>
+          <p>Deduplicate by normalized CIDR. First occurrence wins.</p>
+        </div>
+        <div class="feature">
+          <div class="feature-name">--check</div>
+          <p>
+            Exit 0 if already sorted. Combine with any flag for CI enforcement.
+          </p>
+        </div>
+        <div class="feature">
+          <div class="feature-name">decoration-aware</div>
+          <p>
+            YAML list markers, JSON brackets, inline keys are all preserved
+            exactly.
+          </p>
+        </div>
+        <div class="feature">
+          <div class="feature-name">IPv4 + IPv6</div>
+          <p>
+            Mixed input supported. IPv4 sorts first by default;
+            <code
+              style="
+                font-family: var(--mono);
+                font-size: 0.8em;
+                color: var(--accent);
+              "
+              >--ipv6-first</code
+            >
+            reverses this.
+          </p>
+        </div>
+      </div>
+
+      <section class="install">
+        <h2>Get it</h2>
+        <p class="install-note">
+          Download a pre-built binary for your platform from the
+          <a href="https://github.com/mfinelli/ipsort/releases">releases page</a
+          >, or build from source. Shell completions and a manpage are included.
+          See the
+          <a href="https://github.com/mfinelli/ipsort#installation">README</a>
+          for full installation instructions.
+        </p>
+      </section>
+
+      <footer>
+        <span
+          >Copyright &copy; 2026 Mario Finelli &nbsp;·&nbsp;
+          GPL-3.0-or-later</span
+        >
+        <a class="github-link" href="https://github.com/mfinelli/ipsort">
+          <svg class="github-icon" viewBox="0 0 16 16" aria-hidden="true">
+            <path
+              d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38
+            0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13
+            -.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87
+            2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95
+            0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21
+            2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04
+            2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82
+            2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48
+            0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"
+            />
+          </svg>
+          GitHub
+        </a>
+      </footer>
+    </div>
+  </body>
+</html>
