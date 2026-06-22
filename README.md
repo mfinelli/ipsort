@@ -7,6 +7,12 @@ than lexicographically. It handles plain lists, YAML and JSON list items, inline
 config values, and other mixed content, preserving surrounding decoration while
 reordering only the addresses.
 
+> [!NOTE]
+>
+> This project is feature-complete and in low-activity maintenance mode. I
+> actively monitor issues for bugs or feature requests and keep dependencies
+> updated, but no major active development is planned.
+
 ## Features
 
 - Sorts IPv4 and IPv6 addresses numerically
