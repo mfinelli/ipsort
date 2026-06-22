@@ -157,7 +157,11 @@ downstream.
 Sort a list of addresses from stdin:
 
 ```
-$ printf '192.168.1.0/24\n10.0.0.0/8\n172.16.0.0/12\n' | ipsort
+$ cat <<EOF | ipsort
+192.168.1.0/24
+10.0.0.0/8
+172.16.0.0/12
+EOF
 10.0.0.0/8
 172.16.0.0/12
 192.168.1.0/24
@@ -226,7 +230,11 @@ allowed_ips: 10.0.0.0/8 172.16.1.0/24
 Deduplicate a list:
 
 ```
-$ printf '10.0.0.0/8\n192.168.0.0/16\n10.0.0.0/8\n' | ipsort --unique
+$ cat <<EOF | ipsort --unique
+10.0.0.0/8
+192.168.0.0/16
+10.0.0.0/8
+EOF
 10.0.0.0/8
 192.168.0.0/16
 ```
@@ -234,7 +242,10 @@ $ printf '10.0.0.0/8\n192.168.0.0/16\n10.0.0.0/8\n' | ipsort --unique
 Normalize output to canonical form:
 
 ```
-$ printf '10.0.0.5/24\n192.168.1.1\n' | ipsort --normalize
+$ cat <<EOF | ipsort --normalize
+10.0.0.5/24
+192.168.1.1
+EOF
 10.0.0.0/24
 192.168.1.1/32
 ```
