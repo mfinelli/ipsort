@@ -18,7 +18,7 @@ jobs:
       matrix:
         os: [macos, ubuntu]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
         with:
           version: latest
@@ -56,7 +56,7 @@ jobs:
     timeout-minutes: 90
     needs: [main]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: docker/setup-qemu-action@v4
       - uses: docker/setup-buildx-action@v4
       - uses: docker/metadata-action@v6
@@ -128,7 +128,7 @@ jobs:
           NAME="${NAME}_${{ steps.arch.outputs.name }}"
           NAME="${NAME}.tar.zst"
           echo "name=${NAME}" >> $GITHUB_OUTPUT
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Install scdoc
         run: |
           if [ "$RUNNER_OS" == "Linux" ]; then
@@ -191,7 +191,7 @@ jobs:
     timeout-minutes: 10
     needs: [release]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
         with:
           version: latest
