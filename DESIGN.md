@@ -260,6 +260,7 @@ combined via a separate flag to avoid ambiguity.
 - Emit the canonical network string for each IP rather than the original token
 - Host bits are cleared: `10.0.0.5/24` → `10.0.0.0/24`
 - Bare IPs get explicit prefix lengths: `192.168.1.1` → `192.168.1.1/32`
+- IPv6 hex digits are lowercased: `2001:DB8::FfAb` → `2001:db8::ffab/128`
 - Does not affect `NonIp` spans, which are always emitted verbatim
 
 ### Deduplication: `--unique` / `-u`

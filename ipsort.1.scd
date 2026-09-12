@@ -64,7 +64,8 @@ reordered, leaving comments, keys, blank lines, and all other content untouched.
 *-n*, *--normalize*
 	Emit canonical network strings instead of the original token. Host bits are
 	cleared (_10.0.0.5/24_ becomes _10.0.0.0/24_) and bare IPs gain explicit
-	prefix lengths (_192.168.1.1_ becomes _192.168.1.1/32_). Surrounding
+	prefix lengths (_192.168.1.1_ becomes _192.168.1.1/32_). IPv6 hex digits are
+	also lowercased (_2001:DB8::FfAb_ becomes _2001:db8::ffab/128_). Surrounding
 	decoration is unaffected.
 
 *--ips-only*

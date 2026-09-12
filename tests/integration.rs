@@ -236,6 +236,16 @@ fn test_normalize_bare_ipv6() {
 }
 
 #[test]
+fn test_normalize_downcases_ipv6_hex() {
+    ipsort()
+        .args(["--normalize"])
+        .write_stdin("2001:DB8::FfAb\n")
+        .assert()
+        .success()
+        .stdout("2001:db8::ffab/128\n");
+}
+
+#[test]
 fn test_normalize_preserves_decoration() {
     ipsort()
         .args(["--normalize"])

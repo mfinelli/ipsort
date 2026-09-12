@@ -284,6 +284,14 @@ EOF
 192.168.1.1/32
 ```
 
+`--normalize` also lowercases IPv6 hex digits, since it always emits the
+canonical network string rather than the original token:
+
+```sh
+$ echo "2001:DB8::FfAb" | ipsort --normalize
+2001:db8::ffab/128
+```
+
 **Extract bare IPs, discarding all decoration and structure:**
 
 ```sh

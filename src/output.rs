@@ -30,7 +30,8 @@
 //! **`--normalize`**: same as default but `Ip` spans emit the canonical
 //! network string (`10.0.0.0/8`) rather than the original token
 //! (`10.0.0.5/8`). Bare IPs gain explicit prefix lengths (`192.168.1.1` ->
-//! `192.168.1.1/32`).
+//! `192.168.1.1/32`). IPv6 hex digits are also lowercased (`2001:DB8::FfAb`
+//! -> `2001:db8::ffab/128`).
 //!
 //! **`--ips-only`** ([`IpsOnlyMode::Flat`]): all `NonIp` spans and all
 //! [`ClassifiedLine::NoIp`] lines are discarded. Each `Ip` span becomes one
@@ -377,6 +378,22 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(render_with("2001:db8::1", &opts), vec!["2001:db8::1/128"]);
+    }
+
+    #[test]
+    fn test_normalize_ipv6_hex_downcased() {
+        let opts = OutputOptions {
+            normalize: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            render_with("2001:DB8::FfAb/32", &opts),
+            vec!["2001:db8::/32"]
+        );
+        assert_eq!(
+            render_with("2001:DB8::FfAb", &opts),
+            vec!["2001:db8::ffab/128"]
+        );
     }
 
     #[test]
