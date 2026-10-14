@@ -6,7 +6,7 @@
     "write": "prettier --write ."
   },
   "devDependencies": {
-    "prettier": "^3.9.6",
+    "prettier": "^3.9.9",
     "wrangler": "^4.114.0"
   }
 }
