@@ -12,7 +12,7 @@ cver="$(grep '^version' Cargo.toml | awk -F\" '{print $2}')"
 hver="$(grep '<span class="version">' index.html | awk -F\> '{print $2}' |
   awk -F\< '{print $1}')"
 
-if [[ $dver != "v$cver" ]]; then
+if [[ $dver != "$cver" ]]; then
   echo >&2 "error: version mismatch"
 
   echo "dockerfile: $dver"
